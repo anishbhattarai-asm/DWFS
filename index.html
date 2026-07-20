@@ -23,7 +23,7 @@
 
 <div id="ui">
     <input type="file" id="fileInput" accept="image/*">
-    <label>points <input type="number" id="pointsIn" value="1500" min="100" max="8000" step="100"></label>
+    <label>points <input type="number" id="pointsIn" value="5000" min="100" max="12000" step="500"></label>
     <label>relax <input type="number" id="relaxIn" value="25" min="0" max="80"></label>
     <button id="buildBtn" disabled>Build</button>
     <button id="downloadBtn" disabled>Download JSON</button>
@@ -40,7 +40,9 @@ const buildBtn = document.getElementById("buildBtn");
 const downloadBtn = document.getElementById("downloadBtn");
 
 const MAX_DIM = 360;
-const GAMMA = 1.2;
+const GAMMA = 1.6;
+const WHITE_CUTOFF = 230;
+const MAX_POINTS = 12000;
 const KNN = 8;
 const TWO_OPT_MS = 3000;
 
@@ -82,7 +84,8 @@ function prepImage(img) {
     for (let i = 0; i < w * h; i++) {
         const lum = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
         gray[i] = lum;
-        density[i] = Math.pow((255 - lum) / 255, GAMMA);
+        const base = lum >= WHITE_CUTOFF ? 0 : (WHITE_CUTOFF - lum) / WHITE_CUTOFF;
+        density[i] = Math.pow(base, GAMMA);
     }
     return { w, h, gray, density };
 }
@@ -314,7 +317,7 @@ async function build() {
     buildBtn.disabled = true;
     downloadBtn.disabled = true;
 
-    const N = Math.max(100, parseInt(document.getElementById("pointsIn").value) || 1500);
+    const N = Math.min(MAX_POINTS, Math.max(100, parseInt(document.getElementById("pointsIn").value) || 4000));
     const iters = Math.max(0, parseInt(document.getElementById("relaxIn").value) || 0);
 
     setStatus("reading image");

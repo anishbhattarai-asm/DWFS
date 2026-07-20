@@ -6,8 +6,9 @@ from PIL import Image
 from scipy.spatial import cKDTree
 
 MAX_DIM = 400
-GAMMA = 1.2
-POINTS = 1500
+GAMMA = 1.6
+WHITE_CUTOFF = 230.0
+POINTS = 8000
 RELAX = 30
 KNN = 8
 TWO_OPT_SECONDS = 8
@@ -20,7 +21,8 @@ def load_density(path):
     h = max(1, round(img.size[1] * scale))
     img = img.resize((w, h))
     lum = np.asarray(img, dtype=float)
-    density = ((255.0 - lum) / 255.0) ** GAMMA
+    base = np.clip((WHITE_CUTOFF - lum) / WHITE_CUTOFF, 0.0, 1.0)
+    density = base ** GAMMA
     return density, w, h
 
 
