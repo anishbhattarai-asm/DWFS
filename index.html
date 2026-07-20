@@ -20,8 +20,9 @@ const ctx = canvas.getContext("2d");
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-const THRESHOLD = 128;
 const NUM_POINTS = 400;
+const MAX_DIM = 300;
+const EDGE_THRESHOLD = 0.2;
 
 let points = [];
 let fourier = [];
@@ -101,20 +102,40 @@ function animate() {
     requestAnimationFrame(animate);
 }
 
-function extractBoundary(data, w, h) {
-    const dark = (x, y) => {
-        if (x < 0 || y < 0 || x >= w || y >= h) return false;
-        return data[(y * w + x) * 4] < THRESHOLD;
-    };
+function toGray(data, w, h) {
+    const g = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+        const r = data[i * 4];
+        const gc = data[i * 4 + 1];
+        const b = data[i * 4 + 2];
+        g[i] = 0.299 * r + 0.587 * gc + 0.114 * b;
+    }
+    return g;
+}
 
+function sobelEdges(gray, w, h) {
+    const mag = new Float32Array(w * h);
+    let maxMag = 0;
+
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            const i = y * w + x;
+            const tl = gray[i - w - 1], t = gray[i - w], tr = gray[i - w + 1];
+            const l = gray[i - 1], r = gray[i + 1];
+            const bl = gray[i + w - 1], bc = gray[i + w], br = gray[i + w + 1];
+            const gx = (tr + 2 * r + br) - (tl + 2 * l + bl);
+            const gy = (bl + 2 * bc + br) - (tl + 2 * t + tr);
+            const m = Math.sqrt(gx * gx + gy * gy);
+            mag[i] = m;
+            if (m > maxMag) maxMag = m;
+        }
+    }
+
+    const thr = maxMag * EDGE_THRESHOLD;
     const pts = [];
-    for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-            if (!dark(x, y)) continue;
-            if (!dark(x - 1, y) || !dark(x + 1, y) ||
-                !dark(x, y - 1) || !dark(x, y + 1)) {
-                pts.push({ x, y });
-            }
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            if (mag[y * w + x] > thr) pts.push({ x, y });
         }
     }
     return pts;
@@ -181,18 +202,22 @@ document.getElementById("fileInput").addEventListener("change", function(e){
     img.src = URL.createObjectURL(e.target.files[0]);
 
     img.onload = () => {
+        const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+
         const tCanvas = document.createElement("canvas");
         const tCtx = tCanvas.getContext("2d");
+        tCanvas.width = w;
+        tCanvas.height = h;
+        tCtx.drawImage(img, 0, 0, w, h);
 
-        tCanvas.width = img.width;
-        tCanvas.height = img.height;
-        tCtx.drawImage(img, 0, 0);
+        const data = tCtx.getImageData(0, 0, w, h).data;
+        const gray = toGray(data, w, h);
+        const raw = sobelEdges(gray, w, h);
 
-        const data = tCtx.getImageData(0, 0, img.width, img.height).data;
-
-        const raw = extractBoundary(data, img.width, img.height);
         if (raw.length === 0) {
-            alert("No dark shape found. Try an outline image or a darker picture.");
+            alert("No clear edges found. Try an image with more contrast.");
             return;
         }
 
@@ -200,8 +225,8 @@ document.getElementById("fileInput").addEventListener("change", function(e){
         let sampled = resampleClosed(ordered, NUM_POINTS);
 
         sampled = sampled.map(p => ({
-            x: p.x - img.width / 2,
-            y: p.y - img.height / 2
+            x: p.x - w / 2,
+            y: p.y - h / 2
         }));
 
         console.log("edges:", raw.length, "sampled:", sampled.length);
