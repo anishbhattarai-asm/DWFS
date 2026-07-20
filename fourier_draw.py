@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 FILE = "tsp.json"
-NUM_CIRCLES = 250
+NUM_CIRCLES = 400
 FRAMES = 400
 SAVE = None
 
