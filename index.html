@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Fourier Epicycle Drawer</title>
+<style>
+    body { margin: 0; background: black; overflow: hidden; }
+    #fileInput { position: absolute; top: 10px; left: 10px; z-index: 10; }
+</style>
+</head>
+<body>
+
+<input type="file" id="fileInput" accept="image/*">
+
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const THRESHOLD = 128;
+const NUM_POINTS = 400;
+
+let points = [];
+let fourier = [];
+let time = 0;
+let path = [];
+
+function dft(points) {
+    let X = [];
+    const N = points.length;
+
+    for (let k = 0; k < N; k++) {
+        let re = 0, im = 0;
+        for (let n = 0; n < N; n++) {
+            const angle = (2 * Math.PI * k * n) / N;
+            re += points[n].x * Math.cos(angle) + points[n].y * Math.sin(angle);
+            im += -points[n].x * Math.sin(angle) + points[n].y * Math.cos(angle);
+        }
+        re /= N;
+        im /= N;
+        const freq = k;
+        const amp = Math.sqrt(re*re + im*im);
+        const phase = Math.atan2(im, re);
+        X.push({ re, im, freq, amp, phase });
+    }
+
+    X.sort((a,b) => b.amp - a.amp);
+    return X;
+}
+
+function drawEpicycles(x, y, rotation, fourier) {
+    for (let i = 0; i < fourier.length; i++) {
+        const prevx = x;
+        const prevy = y;
+        const freq = fourier[i].freq;
+        const radius = fourier[i].amp;
+        const phase = fourier[i].phase;
+
+        x += radius * Math.cos(freq * time + phase + rotation);
+        y += radius * Math.sin(freq * time + phase + rotation);
+
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(255,255,255,0.2)";
+        ctx.arc(prevx, prevy, radius, 0, 2*Math.PI);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.strokeStyle = "white";
+        ctx.moveTo(prevx, prevy);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+    }
+    return {x, y};
+}
+
+function animate() {
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const v = drawEpicycles(canvas.width/2, canvas.height/2, 0, fourier);
+
+    path.unshift(v);
+
+    ctx.beginPath();
+    ctx.strokeStyle = "cyan";
+    for (let i = 0; i < path.length - 1; i++) {
+        ctx.moveTo(path[i].x, path[i].y);
+        ctx.lineTo(path[i+1].x, path[i+1].y);
+    }
+    ctx.stroke();
+
+    time += (2 * Math.PI) / NUM_POINTS;
+    if (time > 2 * Math.PI) {
+        time = 0;
+        path = [];
+    }
+
+    requestAnimationFrame(animate);
+}
+
+function extractBoundary(data, w, h) {
+    const dark = (x, y) => {
+        if (x < 0 || y < 0 || x >= w || y >= h) return false;
+        return data[(y * w + x) * 4] < THRESHOLD;
+    };
+
+    const pts = [];
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            if (!dark(x, y)) continue;
+            if (!dark(x - 1, y) || !dark(x + 1, y) ||
+                !dark(x, y - 1) || !dark(x, y + 1)) {
+                pts.push({ x, y });
+            }
+        }
+    }
+    return pts;
+}
+
+function orderPath(points) {
+    if (points.length === 0) return [];
+    const used = new Uint8Array(points.length);
+    const ordered = [points[0]];
+    used[0] = 1;
+    let curr = 0;
+
+    for (let step = 1; step < points.length; step++) {
+        const p = points[curr];
+        let best = -1, bestD = Infinity;
+        for (let j = 0; j < points.length; j++) {
+            if (used[j]) continue;
+            const dx = points[j].x - p.x;
+            const dy = points[j].y - p.y;
+            const d = dx * dx + dy * dy;
+            if (d < bestD) { bestD = d; best = j; }
+        }
+        if (best === -1) break;
+        used[best] = 1;
+        ordered.push(points[best]);
+        curr = best;
+    }
+    return ordered;
+}
+
+function resampleClosed(path, n) {
+    if (path.length < 2) return path.slice();
+
+    const cum = [0];
+    for (let i = 1; i < path.length; i++) {
+        const dx = path[i].x - path[i - 1].x;
+        const dy = path[i].y - path[i - 1].y;
+        cum.push(cum[i - 1] + Math.hypot(dx, dy));
+    }
+    const dxc = path[0].x - path[path.length - 1].x;
+    const dyc = path[0].y - path[path.length - 1].y;
+    const total = cum[cum.length - 1] + Math.hypot(dxc, dyc);
+    if (total === 0) return path.slice();
+
+    const out = [];
+    let seg = 0;
+    for (let i = 0; i < n; i++) {
+        const target = (i / n) * total;
+        while (seg < path.length - 1 && cum[seg + 1] < target) seg++;
+        const a = path[seg];
+        const b = path[(seg + 1) % path.length];
+        const segStart = cum[seg];
+        const segLen = (seg < path.length - 1
+            ? cum[seg + 1] - cum[seg]
+            : total - cum[seg]) || 1;
+        const t = (target - segStart) / segLen;
+        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
+    return out;
+}
+
+document.getElementById("fileInput").addEventListener("change", function(e){
+    const img = new Image();
+    img.src = URL.createObjectURL(e.target.files[0]);
+
+    img.onload = () => {
+        const tCanvas = document.createElement("canvas");
+        const tCtx = tCanvas.getContext("2d");
+
+        tCanvas.width = img.width;
+        tCanvas.height = img.height;
+        tCtx.drawImage(img, 0, 0);
+
+        const data = tCtx.getImageData(0, 0, img.width, img.height).data;
+
+        const raw = extractBoundary(data, img.width, img.height);
+        if (raw.length === 0) {
+            alert("No dark shape found. Try an outline image or a darker picture.");
+            return;
+        }
+
+        const ordered = orderPath(raw);
+        let sampled = resampleClosed(ordered, NUM_POINTS);
+
+        sampled = sampled.map(p => ({
+            x: p.x - img.width / 2,
+            y: p.y - img.height / 2
+        }));
+
+        console.log("edges:", raw.length, "sampled:", sampled.length);
+
+        points = sampled;
+        fourier = dft(points);
+        time = 0;
+        path = [];
+
+        animate();
+    };
+});
+</script>
+
+</body>
+</html>
