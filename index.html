@@ -43,8 +43,8 @@ const MAX_DIM = 360;
 const GAMMA = 1.6;
 const WHITE_CUTOFF = 230;
 const MAX_POINTS = 12000;
-const KNN = 8;
-const TWO_OPT_MS = 3000;
+const KNN = 10;
+const TWO_OPT_MS = 6000;
 
 let loadedImg = null;
 let result = null;
@@ -245,35 +245,52 @@ async function twoOpt(order, px, py, nb, k, budgetMs) {
         return Math.sqrt(dx * dx + dy * dy);
     };
 
+    const dontlook = new Uint8Array(N);
     const t0 = performance.now();
-    let improved = true;
-    while (improved) {
-        improved = false;
-        for (let i = 0; i < N - 1; i++) {
-            const c1 = order[i];
-            const c2 = order[i + 1];
-            const d12 = D(c1, c2);
-            for (let n = 0; n < k; n++) {
-                const c3 = nb[c1 * k + n];
-                const j = pos[c3];
-                if (j <= i) continue;
-                const d13 = D(c1, c3);
-                if (d13 >= d12) break;
-                const c4 = order[j + 1 < N ? j + 1 : 0];
-                const gain = d12 + D(c3, c4) - d13 - D(c2, c4);
-                if (gain > 1e-6) {
-                    let a = i + 1, b = j;
-                    while (a < b) {
-                        const t = order[a]; order[a] = order[b]; order[b] = t;
-                        pos[order[a]] = a; pos[order[b]] = b;
-                        a++; b--;
+    let remaining = N;
+    while (remaining > 0) {
+        remaining = 0;
+        for (let c1 = 0; c1 < N; c1++) {
+            if (dontlook[c1]) continue;
+            let improved = false;
+            const a = pos[c1];
+
+            for (let s = 1; s >= -1 && !improved; s -= 2) {
+                const c2 = order[(a + s + N) % N];
+                const d12 = D(c1, c2);
+                for (let n = 0; n < k; n++) {
+                    const c3 = nb[c1 * k + n];
+                    if (c3 === c1 || c3 === c2) continue;
+                    const d13 = D(c1, c3);
+                    if (d13 >= d12) break;
+                    const cp = pos[c3];
+                    const c4 = order[(cp + s + N) % N];
+                    if (c4 === c1) continue;
+                    const gain = d12 + D(c3, c4) - d13 - D(c2, c4);
+                    if (gain > 1e-7) {
+                        const leftA = s === 1 ? a : (a - 1 + N) % N;
+                        const leftB = s === 1 ? cp : (cp - 1 + N) % N;
+                        if (leftA === leftB) continue;
+                        const lo = Math.min(leftA, leftB);
+                        const hi = Math.max(leftA, leftB);
+                        let x = lo + 1, y = hi;
+                        while (x < y) {
+                            const t = order[x]; order[x] = order[y]; order[y] = t;
+                            pos[order[x]] = x; pos[order[y]] = y;
+                            x++; y--;
+                        }
+                        if (x === y) pos[order[x]] = x;
+                        dontlook[c1] = 0; dontlook[c2] = 0; dontlook[c3] = 0; dontlook[c4] = 0;
+                        improved = true;
+                        break;
                     }
-                    if (a === b) pos[order[a]] = a;
-                    improved = true;
-                    break;
                 }
             }
-            if (performance.now() - t0 > budgetMs) return;
+
+            if (improved) remaining++;
+            else dontlook[c1] = 1;
+
+            if (performance.now() - t0 > budgetMs) { remaining = 0; break; }
         }
         setStatus("optimizing tour");
         await tick();

@@ -10,8 +10,8 @@ GAMMA = 1.6
 WHITE_CUTOFF = 230.0
 POINTS = 8000
 RELAX = 30
-KNN = 8
-TWO_OPT_SECONDS = 8
+KNN = 10
+TWO_OPT_SECONDS = 15
 
 
 def load_density(path):
@@ -95,39 +95,59 @@ def greedy_tour(pts):
 
 def two_opt(order, pts, knn, seconds):
     n = len(order)
+    order = order.copy()
     tree = cKDTree(pts)
     _, nb = tree.query(pts, k=knn + 1)
     nb = nb[:, 1:]
     pos = np.empty(n, dtype=int)
-    for i in range(n):
-        pos[order[i]] = i
+    pos[order] = np.arange(n)
 
     def d(a, b):
         return float(np.hypot(pts[a, 0] - pts[b, 0], pts[a, 1] - pts[b, 1]))
 
+    dontlook = np.zeros(n, dtype=bool)
     t0 = time.time()
-    improved = True
-    while improved and time.time() - t0 < seconds:
-        improved = False
-        for i in range(n - 1):
-            c1 = order[i]
-            c2 = order[i + 1]
-            d12 = d(c1, c2)
-            for c3 in nb[c1]:
-                j = pos[c3]
-                if j <= i:
-                    continue
-                d13 = d(c1, c3)
-                if d13 >= d12:
-                    continue
-                c4 = order[j + 1] if j + 1 < n else order[0]
-                gain = d12 + d(c3, c4) - d13 - d(c2, c4)
-                if gain > 1e-6:
-                    order[i + 1:j + 1] = order[i + 1:j + 1][::-1]
-                    pos[order[i + 1:j + 1]] = np.arange(i + 1, j + 1)
-                    improved = True
-                    c2 = order[i + 1]
-                    d12 = d(c1, c2)
+    remaining = n
+    while remaining > 0 and time.time() - t0 < seconds:
+        remaining = 0
+        for c1 in range(n):
+            if dontlook[c1]:
+                continue
+            improved = False
+            a = pos[c1]
+            for s in (1, -1):
+                if improved:
+                    break
+                c2 = order[(a + s) % n]
+                d12 = d(c1, c2)
+                for c3 in nb[c1]:
+                    c3 = int(c3)
+                    if c3 == c1 or c3 == c2:
+                        continue
+                    d13 = d(c1, c3)
+                    if d13 >= d12:
+                        break
+                    cp = pos[c3]
+                    c4 = order[(cp + s) % n]
+                    if c4 == c1:
+                        continue
+                    gain = d12 + d(c3, c4) - d13 - d(c2, c4)
+                    if gain > 1e-7:
+                        left_a = a if s == 1 else (a - 1) % n
+                        left_b = cp if s == 1 else (cp - 1) % n
+                        if left_a == left_b:
+                            continue
+                        lo = min(left_a, left_b)
+                        hi = max(left_a, left_b)
+                        order[lo + 1:hi + 1] = order[lo + 1:hi + 1][::-1]
+                        pos[order[lo + 1:hi + 1]] = np.arange(lo + 1, hi + 1)
+                        dontlook[c1] = dontlook[c2] = dontlook[c3] = dontlook[c4] = False
+                        improved = True
+                        break
+            if improved:
+                remaining += 1
+            else:
+                dontlook[c1] = True
             if time.time() - t0 > seconds:
                 break
     return order
