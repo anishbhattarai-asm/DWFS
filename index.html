@@ -2,242 +2,373 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Fourier Epicycle Drawer</title>
+<title>DWFS TSP Art Engine</title>
 <style>
-    body { margin: 0; background: black; overflow: hidden; }
-    #fileInput { position: absolute; top: 10px; left: 10px; z-index: 10; }
+    body { margin: 0; background: #111; color: #eee; font-family: sans-serif; overflow: hidden; }
+    #ui {
+        position: absolute; top: 0; left: 0; right: 0;
+        display: flex; gap: 12px; align-items: center;
+        padding: 8px 12px; background: #1c1c1c; z-index: 10;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    #ui label { font-size: 13px; display: flex; gap: 4px; align-items: center; }
+    #ui input[type=number] { width: 64px; }
+    #ui button { padding: 4px 12px; cursor: pointer; }
+    #ui button:disabled { opacity: 0.5; cursor: default; }
+    #status { font-size: 13px; color: #9ad; margin-left: auto; }
+    canvas { display: block; }
 </style>
 </head>
 <body>
 
-<input type="file" id="fileInput" accept="image/*">
+<div id="ui">
+    <input type="file" id="fileInput" accept="image/*">
+    <label>points <input type="number" id="pointsIn" value="1500" min="100" max="8000" step="100"></label>
+    <label>relax <input type="number" id="relaxIn" value="25" min="0" max="80"></label>
+    <button id="buildBtn" disabled>Build</button>
+    <button id="downloadBtn" disabled>Download JSON</button>
+    <span id="status">load a line art image</span>
+</div>
 
 <canvas id="canvas"></canvas>
 
 <script>
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+const statusEl = document.getElementById("status");
+const buildBtn = document.getElementById("buildBtn");
+const downloadBtn = document.getElementById("downloadBtn");
 
-const NUM_POINTS = 400;
-const MAX_DIM = 300;
-const EDGE_THRESHOLD = 0.2;
+const MAX_DIM = 360;
+const GAMMA = 1.2;
+const KNN = 8;
+const TWO_OPT_MS = 3000;
 
-let points = [];
-let fourier = [];
-let time = 0;
-let path = [];
+let loadedImg = null;
+let result = null;
 
-function dft(points) {
-    let X = [];
-    const N = points.length;
+function fitCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight - 48;
+}
+fitCanvas();
+window.addEventListener("resize", () => {
+    fitCanvas();
+    if (result) drawPath(result.order, result.px, result.py, result.w, result.h);
+});
 
-    for (let k = 0; k < N; k++) {
-        let re = 0, im = 0;
-        for (let n = 0; n < N; n++) {
-            const angle = (2 * Math.PI * k * n) / N;
-            re += points[n].x * Math.cos(angle) + points[n].y * Math.sin(angle);
-            im += -points[n].x * Math.sin(angle) + points[n].y * Math.cos(angle);
-        }
-        re /= N;
-        im /= N;
-        const freq = k;
-        const amp = Math.sqrt(re*re + im*im);
-        const phase = Math.atan2(im, re);
-        X.push({ re, im, freq, amp, phase });
-    }
-
-    X.sort((a,b) => b.amp - a.amp);
-    return X;
+function tick() {
+    return new Promise(r => setTimeout(r, 0));
 }
 
-function drawEpicycles(x, y, rotation, fourier) {
-    for (let i = 0; i < fourier.length; i++) {
-        const prevx = x;
-        const prevy = y;
-        const freq = fourier[i].freq;
-        const radius = fourier[i].amp;
-        const phase = fourier[i].phase;
-
-        x += radius * Math.cos(freq * time + phase + rotation);
-        y += radius * Math.sin(freq * time + phase + rotation);
-
-        ctx.beginPath();
-        ctx.strokeStyle = "rgba(255,255,255,0.2)";
-        ctx.arc(prevx, prevy, radius, 0, 2*Math.PI);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.strokeStyle = "white";
-        ctx.moveTo(prevx, prevy);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-    }
-    return {x, y};
+function setStatus(s) {
+    statusEl.textContent = s;
 }
 
-function animate() {
-    ctx.fillStyle = "black";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+function prepImage(img) {
+    const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
 
-    const v = drawEpicycles(canvas.width/2, canvas.height/2, 0, fourier);
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const cx = c.getContext("2d");
+    cx.drawImage(img, 0, 0, w, h);
 
-    path.unshift(v);
-
-    ctx.beginPath();
-    ctx.strokeStyle = "cyan";
-    for (let i = 0; i < path.length - 1; i++) {
-        ctx.moveTo(path[i].x, path[i].y);
-        ctx.lineTo(path[i+1].x, path[i+1].y);
-    }
-    ctx.stroke();
-
-    time += (2 * Math.PI) / NUM_POINTS;
-    if (time > 2 * Math.PI) {
-        time = 0;
-        path = [];
-    }
-
-    requestAnimationFrame(animate);
-}
-
-function toGray(data, w, h) {
-    const g = new Float32Array(w * h);
+    const d = cx.getImageData(0, 0, w, h).data;
+    const gray = new Float32Array(w * h);
+    const density = new Float32Array(w * h);
     for (let i = 0; i < w * h; i++) {
-        const r = data[i * 4];
-        const gc = data[i * 4 + 1];
-        const b = data[i * 4 + 2];
-        g[i] = 0.299 * r + 0.587 * gc + 0.114 * b;
+        const lum = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+        gray[i] = lum;
+        density[i] = Math.pow((255 - lum) / 255, GAMMA);
     }
-    return g;
+    return { w, h, gray, density };
 }
 
-function sobelEdges(gray, w, h) {
-    const mag = new Float32Array(w * h);
-    let maxMag = 0;
+function samplePoints(density, w, h, N) {
+    const px = new Float32Array(N);
+    const py = new Float32Array(N);
 
-    for (let y = 1; y < h - 1; y++) {
-        for (let x = 1; x < w - 1; x++) {
-            const i = y * w + x;
-            const tl = gray[i - w - 1], t = gray[i - w], tr = gray[i - w + 1];
-            const l = gray[i - 1], r = gray[i + 1];
-            const bl = gray[i + w - 1], bc = gray[i + w], br = gray[i + w + 1];
-            const gx = (tr + 2 * r + br) - (tl + 2 * l + bl);
-            const gy = (bl + 2 * bc + br) - (tl + 2 * t + tr);
-            const m = Math.sqrt(gx * gx + gy * gy);
-            mag[i] = m;
-            if (m > maxMag) maxMag = m;
-        }
+    let maxD = 0;
+    for (let i = 0; i < w * h; i++) if (density[i] > maxD) maxD = density[i];
+
+    if (maxD <= 0) {
+        for (let i = 0; i < N; i++) { px[i] = Math.random() * w; py[i] = Math.random() * h; }
+        return { px, py };
     }
 
-    const thr = maxMag * EDGE_THRESHOLD;
-    const pts = [];
-    for (let y = 1; y < h - 1; y++) {
-        for (let x = 1; x < w - 1; x++) {
-            if (mag[y * w + x] > thr) pts.push({ x, y });
+    let count = 0;
+    let guard = 0;
+    const maxGuard = N * 4000;
+    while (count < N && guard < maxGuard) {
+        const x = Math.floor(Math.random() * w);
+        const y = Math.floor(Math.random() * h);
+        if (Math.random() < density[y * w + x] / maxD) {
+            px[count] = x;
+            py[count] = y;
+            count++;
         }
+        guard++;
     }
-    return pts;
+    for (; count < N; count++) { px[count] = Math.random() * w; py[count] = Math.random() * h; }
+    return { px, py };
 }
 
-function orderPath(points) {
-    if (points.length === 0) return [];
-    const used = new Uint8Array(points.length);
-    const ordered = [points[0]];
-    used[0] = 1;
-    let curr = 0;
+function jfaSeed(px, py, N, w, h) {
+    const seed = new Int32Array(w * h).fill(-1);
+    for (let s = 0; s < N; s++) {
+        const x = Math.min(w - 1, Math.max(0, Math.round(px[s])));
+        const y = Math.min(h - 1, Math.max(0, Math.round(py[s])));
+        seed[y * w + x] = s;
+    }
 
-    for (let step = 1; step < points.length; step++) {
-        const p = points[curr];
-        let best = -1, bestD = Infinity;
-        for (let j = 0; j < points.length; j++) {
-            if (used[j]) continue;
-            const dx = points[j].x - p.x;
-            const dy = points[j].y - p.y;
+    let step = 1;
+    while (step < Math.max(w, h)) step <<= 1;
+
+    for (; step >= 1; step >>= 1) {
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const idx = y * w + x;
+                let s = seed[idx];
+                let bd = s < 0 ? Infinity : (x - px[s]) * (x - px[s]) + (y - py[s]) * (y - py[s]);
+                for (let dy = -1; dy <= 1; dy++) {
+                    const ny = y + dy * step;
+                    if (ny < 0 || ny >= h) continue;
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const nx = x + dx * step;
+                        if (nx < 0 || nx >= w) continue;
+                        const ns = seed[ny * w + nx];
+                        if (ns < 0) continue;
+                        const d = (x - px[ns]) * (x - px[ns]) + (y - py[ns]) * (y - py[ns]);
+                        if (d < bd) { bd = d; s = ns; }
+                    }
+                }
+                seed[idx] = s;
+            }
+        }
+    }
+    return seed;
+}
+
+async function lloyd(px, py, density, w, h, iters) {
+    const N = px.length;
+    const sx = new Float64Array(N);
+    const sy = new Float64Array(N);
+    const sw = new Float64Array(N);
+
+    for (let it = 0; it < iters; it++) {
+        const seed = jfaSeed(px, py, N, w, h);
+        sx.fill(0); sy.fill(0); sw.fill(0);
+
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const s = seed[y * w + x];
+                if (s < 0) continue;
+                const wgt = density[y * w + x];
+                sx[s] += x * wgt;
+                sy[s] += y * wgt;
+                sw[s] += wgt;
+            }
+        }
+
+        for (let s = 0; s < N; s++) {
+            if (sw[s] > 1e-6) { px[s] = sx[s] / sw[s]; py[s] = sy[s] / sw[s]; }
+            else { px[s] = Math.random() * w; py[s] = Math.random() * h; }
+        }
+
+        setStatus("relaxing " + (it + 1) + "/" + iters);
+        await tick();
+    }
+}
+
+function greedyTour(px, py, N) {
+    const visited = new Uint8Array(N);
+    const order = new Int32Array(N);
+    let cur = 0;
+    visited[0] = 1;
+    order[0] = 0;
+    for (let i = 1; i < N; i++) {
+        let best = -1, bd = Infinity;
+        const cx = px[cur], cy = py[cur];
+        for (let j = 0; j < N; j++) {
+            if (visited[j]) continue;
+            const dx = px[j] - cx, dy = py[j] - cy;
             const d = dx * dx + dy * dy;
-            if (d < bestD) { bestD = d; best = j; }
+            if (d < bd) { bd = d; best = j; }
         }
-        if (best === -1) break;
-        used[best] = 1;
-        ordered.push(points[best]);
-        curr = best;
+        visited[best] = 1;
+        order[i] = best;
+        cur = best;
     }
-    return ordered;
+    return order;
 }
 
-function resampleClosed(path, n) {
-    if (path.length < 2) return path.slice();
-
-    const cum = [0];
-    for (let i = 1; i < path.length; i++) {
-        const dx = path[i].x - path[i - 1].x;
-        const dy = path[i].y - path[i - 1].y;
-        cum.push(cum[i - 1] + Math.hypot(dx, dy));
+function buildKnn(px, py, N, k) {
+    const nb = new Int32Array(N * k);
+    const idx = new Int32Array(N);
+    const dst = new Float64Array(N);
+    for (let i = 0; i < N; i++) {
+        for (let j = 0; j < N; j++) {
+            idx[j] = j;
+            const dx = px[j] - px[i], dy = py[j] - py[i];
+            dst[j] = dx * dx + dy * dy;
+        }
+        const lim = Math.min(k + 1, N);
+        for (let a = 0; a < lim; a++) {
+            let m = a;
+            for (let b = a + 1; b < N; b++) if (dst[b] < dst[m]) m = b;
+            const td = dst[a]; dst[a] = dst[m]; dst[m] = td;
+            const ti = idx[a]; idx[a] = idx[m]; idx[m] = ti;
+        }
+        let w = 0;
+        for (let a = 0; a < lim && w < k; a++) {
+            if (idx[a] !== i) { nb[i * k + w] = idx[a]; w++; }
+        }
+        while (w < k) { nb[i * k + w] = i; w++; }
     }
-    const dxc = path[0].x - path[path.length - 1].x;
-    const dyc = path[0].y - path[path.length - 1].y;
-    const total = cum[cum.length - 1] + Math.hypot(dxc, dyc);
-    if (total === 0) return path.slice();
-
-    const out = [];
-    let seg = 0;
-    for (let i = 0; i < n; i++) {
-        const target = (i / n) * total;
-        while (seg < path.length - 1 && cum[seg + 1] < target) seg++;
-        const a = path[seg];
-        const b = path[(seg + 1) % path.length];
-        const segStart = cum[seg];
-        const segLen = (seg < path.length - 1
-            ? cum[seg + 1] - cum[seg]
-            : total - cum[seg]) || 1;
-        const t = (target - segStart) / segLen;
-        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
-    }
-    return out;
+    return nb;
 }
 
-document.getElementById("fileInput").addEventListener("change", function(e){
-    const img = new Image();
-    img.src = URL.createObjectURL(e.target.files[0]);
+async function twoOpt(order, px, py, nb, k, budgetMs) {
+    const N = order.length;
+    const pos = new Int32Array(N);
+    for (let i = 0; i < N; i++) pos[order[i]] = i;
 
-    img.onload = () => {
-        const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
-        const w = Math.max(1, Math.round(img.width * scale));
-        const h = Math.max(1, Math.round(img.height * scale));
-
-        const tCanvas = document.createElement("canvas");
-        const tCtx = tCanvas.getContext("2d");
-        tCanvas.width = w;
-        tCanvas.height = h;
-        tCtx.drawImage(img, 0, 0, w, h);
-
-        const data = tCtx.getImageData(0, 0, w, h).data;
-        const gray = toGray(data, w, h);
-        const raw = sobelEdges(gray, w, h);
-
-        if (raw.length === 0) {
-            alert("No clear edges found. Try an image with more contrast.");
-            return;
-        }
-
-        const ordered = orderPath(raw);
-        let sampled = resampleClosed(ordered, NUM_POINTS);
-
-        sampled = sampled.map(p => ({
-            x: p.x - w / 2,
-            y: p.y - h / 2
-        }));
-
-        console.log("edges:", raw.length, "sampled:", sampled.length);
-
-        points = sampled;
-        fourier = dft(points);
-        time = 0;
-        path = [];
-
-        animate();
+    const D = (a, b) => {
+        const dx = px[a] - px[b], dy = py[a] - py[b];
+        return Math.sqrt(dx * dx + dy * dy);
     };
+
+    const t0 = performance.now();
+    let improved = true;
+    while (improved) {
+        improved = false;
+        for (let i = 0; i < N - 1; i++) {
+            const c1 = order[i];
+            const c2 = order[i + 1];
+            const d12 = D(c1, c2);
+            for (let n = 0; n < k; n++) {
+                const c3 = nb[c1 * k + n];
+                const j = pos[c3];
+                if (j <= i) continue;
+                const d13 = D(c1, c3);
+                if (d13 >= d12) break;
+                const c4 = order[j + 1 < N ? j + 1 : 0];
+                const gain = d12 + D(c3, c4) - d13 - D(c2, c4);
+                if (gain > 1e-6) {
+                    let a = i + 1, b = j;
+                    while (a < b) {
+                        const t = order[a]; order[a] = order[b]; order[b] = t;
+                        pos[order[a]] = a; pos[order[b]] = b;
+                        a++; b--;
+                    }
+                    if (a === b) pos[order[a]] = a;
+                    improved = true;
+                    break;
+                }
+            }
+            if (performance.now() - t0 > budgetMs) return;
+        }
+        setStatus("optimizing tour");
+        await tick();
+    }
+}
+
+function drawPath(order, px, py, w, h) {
+    const cw = canvas.width, ch = canvas.height;
+    ctx.fillStyle = "white";
+    ctx.fillRect(0, 0, cw, ch);
+
+    const s = Math.min(cw / w, ch / h) * 0.92;
+    const ox = (cw - w * s) / 2;
+    const oy = (ch - h * s) / 2;
+
+    ctx.strokeStyle = "black";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < order.length; i++) {
+        const c = order[i];
+        const X = ox + px[c] * s;
+        const Y = oy + py[c] * s;
+        if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+    }
+    const c0 = order[0];
+    ctx.lineTo(ox + px[c0] * s, oy + py[c0] * s);
+    ctx.stroke();
+}
+
+function buildJSON(order, px, py, w, h) {
+    const path = [];
+    for (let i = 0; i < order.length; i++) {
+        const c = order[i];
+        path.push([Math.round(px[c] * 100) / 100, Math.round(py[c] * 100) / 100]);
+    }
+    return { width: w, height: h, closed: true, path };
+}
+
+async function build() {
+    if (!loadedImg) return;
+    buildBtn.disabled = true;
+    downloadBtn.disabled = true;
+
+    const N = Math.max(100, parseInt(document.getElementById("pointsIn").value) || 1500);
+    const iters = Math.max(0, parseInt(document.getElementById("relaxIn").value) || 0);
+
+    setStatus("reading image");
+    await tick();
+    const { w, h, density } = prepImage(loadedImg);
+
+    setStatus("sampling points");
+    await tick();
+    const { px, py } = samplePoints(density, w, h, N);
+
+    await lloyd(px, py, density, w, h, iters);
+
+    setStatus("greedy tour");
+    await tick();
+    const order = greedyTour(px, py, N);
+
+    setStatus("nearest neighbors");
+    await tick();
+    const nb = buildKnn(px, py, N, KNN);
+
+    await twoOpt(order, px, py, nb, KNN, TWO_OPT_MS);
+
+    result = { order, px, py, w, h };
+    drawPath(order, px, py, w, h);
+
+    setStatus(N + " points, single path ready");
+    buildBtn.disabled = false;
+    downloadBtn.disabled = false;
+}
+
+document.getElementById("fileInput").addEventListener("change", function (e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const img = new Image();
+    img.onload = () => {
+        loadedImg = img;
+        buildBtn.disabled = false;
+        setStatus("ready, press Build");
+    };
+    img.src = URL.createObjectURL(file);
+});
+
+buildBtn.addEventListener("click", build);
+
+downloadBtn.addEventListener("click", function () {
+    if (!result) return;
+    const json = buildJSON(result.order, result.px, result.py, result.w, result.h);
+    const blob = new Blob([JSON.stringify(json)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tsp.json";
+    a.click();
+    URL.revokeObjectURL(url);
 });
 </script>
 
