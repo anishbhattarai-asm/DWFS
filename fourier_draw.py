@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 FILE = "tsp.json"
-NUM_CIRCLES = 400
-FRAMES = 400
+DRAW_CIRCLES = 140
+FRAMES = 600
 SAVE = None
 
 with open(FILE) as f:
@@ -29,11 +29,7 @@ order = np.argsort(-np.abs(coeffs))
 coeffs = coeffs[order]
 freqs = freqs[order]
 
-if NUM_CIRCLES < N:
-    coeffs = coeffs[:NUM_CIRCLES]
-    freqs = freqs[:NUM_CIRCLES]
-
-fig, ax = plt.subplots(figsize=(7, 7))
+fig, ax = plt.subplots(figsize=(7, 8))
 fig.patch.set_facecolor("black")
 ax.set_facecolor("black")
 ax.set_aspect("equal")
@@ -42,34 +38,31 @@ lim = np.abs(path).max() * 1.15
 ax.set_xlim(-lim, lim)
 ax.set_ylim(-lim, lim)
 
-circles = [ax.plot([], [], color=(1, 1, 1, 0.18), lw=0.6)[0] for _ in freqs]
-arms, = ax.plot([], [], color="white", lw=0.6)
-trace, = ax.plot([], [], color="cyan", lw=1.6)
+k = min(DRAW_CIRCLES, N)
+circles = [ax.plot([], [], color=(1, 1, 1, 0.16), lw=0.5)[0] for _ in range(k)]
+arms, = ax.plot([], [], color=(1, 1, 1, 0.55), lw=0.5)
+trace, = ax.plot([], [], color="cyan", lw=1.3)
 
-theta = np.linspace(0, 2 * np.pi, 64)
+theta = np.linspace(0, 2 * np.pi, 48)
 trace_x = []
 trace_y = []
 
 
 def step(frame):
     t = 2 * np.pi * frame / FRAMES
-    x = 0.0
-    y = 0.0
-    arm_x = [0.0]
-    arm_y = [0.0]
-    for i in range(len(coeffs)):
-        prev_x = x
-        prev_y = y
-        val = coeffs[i] * np.exp(1j * freqs[i] * t)
-        x += val.real
-        y += val.imag
+    vecs = coeffs * np.exp(1j * freqs * t)
+    pos = np.concatenate([[0], np.cumsum(vecs)])
+
+    arms.set_data(pos.real, pos.imag)
+
+    for i in range(k):
         r = abs(coeffs[i])
-        circles[i].set_data(prev_x + r * np.cos(theta), prev_y + r * np.sin(theta))
-        arm_x.append(x)
-        arm_y.append(y)
-    arms.set_data(arm_x, arm_y)
-    trace_x.append(x)
-    trace_y.append(y)
+        circles[i].set_data(pos[i].real + r * np.cos(theta),
+                            pos[i].imag + r * np.sin(theta))
+
+    tip = pos[-1]
+    trace_x.append(tip.real)
+    trace_y.append(tip.imag)
     if len(trace_x) > FRAMES:
         del trace_x[0]
         del trace_y[0]
