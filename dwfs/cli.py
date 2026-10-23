@@ -2,9 +2,10 @@ import sys
 import subprocess
 
 from . import __version__
-from .tracing import DEFAULTS as TRACE, trace
+from .tracing import DEFAULTS as TRACE, save_json, trace
 from .drawing import DEFAULTS as DRAW, draw
 from .stipple import DEFAULTS as STIPPLE, stipple
+from .vector import TEXT_DEFAULTS as TEXT, text
 
 USAGE = """dwfs %s, draw any picture with Fourier series epicycles
 
@@ -12,16 +13,19 @@ usage:
   dwfs make IMAGE [OUT] [key=value ...]       trace an image and animate it
   dwfs trace IMAGE [JSON] [key=value ...]     trace an image into a path file
   dwfs draw [JSON] [OUT] [key=value ...]      animate a path file
+  dwfs text WORDS [OUT] [key=value ...]       write words in one continuous line
   dwfs stipple IMAGE [JSON] [key=value ...]   build a stipple path for tonal images
   dwfs options                                list every option with its default
 
-JSON defaults to path.json. OUT ending in .mp4 or .gif saves a video, .png or .jpg
+IMAGE can be a photo, a drawing or an .svg file. JSON defaults to path.json. OUT ending in .mp4 or .gif saves a video, .png or .jpg
 saves the finished frame, and leaving it out opens the interactive window, where the
 buttons save too and h shows the keyboard shortcuts.
 
 examples:
   dwfs make portrait.jpg
   dwfs make portrait.jpg portrait.mp4 theme=dark
+  dwfs make logo.svg logo.gif
+  dwfs text "Hello World" hello.mp4 stroke=outline
   dwfs trace logo.png logo.json mode=photo resample=8000
   dwfs draw logo.json logo.gif style=classic grow=false
 """
@@ -78,7 +82,7 @@ def finish(saved):
 
 
 def options():
-    for title, table in (("trace", TRACE), ("draw", DRAW), ("stipple", STIPPLE)):
+    for title, table in (("trace", TRACE), ("text", TEXT), ("draw", DRAW), ("stipple", STIPPLE)):
         print(title)
         for key, value in table.items():
             print("  %s=%s" % (key, value))
@@ -109,6 +113,19 @@ def run(argv):
             raise ValueError("trace needs an image")
         out = args[1] if len(args) > 1 else "path.json"
         describe(trace(args[0], out, **topts), out)
+        return 0
+    if command == "text":
+        if not rest:
+            raise ValueError('text needs some words, for example dwfs text "Hello"')
+        args, (xopts, dopts) = split(rest[1:], TEXT, DRAW)
+        data = text(rest[0], **xopts)
+        out = args[0] if args else None
+        describe(data, None)
+        if out and out.lower().endswith(".json"):
+            save_json(data, out)
+            print("wrote", out)
+        else:
+            finish(draw(data, out, progress=True, **dopts))
         return 0
     if command == "stipple":
         args, (sopts,) = split(rest, STIPPLE)
