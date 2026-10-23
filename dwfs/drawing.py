@@ -2,13 +2,16 @@ import os
 import re
 import json
 import shutil
+import tempfile
 import subprocess
 from types import SimpleNamespace
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.collections import LineCollection, PolyCollection
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import to_rgb
+from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from PIL import Image
 
@@ -278,11 +281,15 @@ def make_layer(ax, m, theme, guides):
     return {"trace": trace, "pen": pen, "parts": parts, "artists": artists}
 
 
-def build(m, cfg, dpi=None, controls=0.0):
+def build(m, cfg, dpi=None, controls=0.0, offscreen=False):
     theme = THEMES[cfg.theme]
     g = layout(m, cfg, controls)
     x0, x1, y0, y1 = m.box
-    fig = plt.figure(figsize=(g.fig_w, g.fig_h), facecolor=theme["bg"], dpi=dpi)
+    if offscreen:
+        fig = Figure(figsize=(g.fig_w, g.fig_h), facecolor=theme["bg"], dpi=cfg.dpi)
+        FigureCanvasAgg(fig)
+    else:
+        fig = plt.figure(figsize=(g.fig_w, g.fig_h), facecolor=theme["bg"], dpi=dpi)
     ax = fig.add_axes([(g.fig_w - g.main_w) / 2 / g.fig_w, g.bottom / g.fig_h, g.main_w / g.fig_w, g.main_h / g.fig_h])
     head = fig.add_axes([0, (g.bottom + g.main_h) / g.fig_h, 1, g.top / g.fig_h])
     foot = fig.add_axes([0, controls / g.fig_h, 1, 1.4 / g.fig_h])
@@ -342,7 +349,8 @@ def build(m, cfg, dpi=None, controls=0.0):
     targets = TARGETS[cfg.style]
     follow = targets[0] if cfg.follow == "auto" or cfg.follow not in targets else cfg.follow
     state = {"on": bool(cfg.lens), "target": targets.index(follow), "zoom": float(cfg.zoom)}
-    lens_artists = lens["artists"] + [lens_text, frame_line]
+    panel = [lens_ax.patch] + list(lens_ax.spines.values())
+    lens_artists = panel + lens["artists"] + [lens_text, frame_line]
     head_size = 0.016 * m.size
 
     def set_lens(on):
@@ -395,7 +403,7 @@ def build(m, cfg, dpi=None, controls=0.0):
         e_text.set_text(r"$\mathrm{approximation\ error} = %.2f\%%$" % m.errors[s])
         return animated
 
-    animated = main["artists"] + [frame_line, n_text, e_text, status] + lens["artists"] + [lens_text]
+    animated = main["artists"] + [frame_line, n_text, e_text, status] + panel + lens["artists"] + [lens_text]
     set_lens(state["on"])
     return SimpleNamespace(fig=fig, ax=ax, foot=foot, lens_ax=lens_ax, step=step, frames=m.frames,
                            animated=animated, lens=state, targets=targets, set_lens=set_lens,
@@ -409,6 +417,68 @@ def animate(data, **options):
                          interval=1000 / cfg.fps, blit=False)
 
 
+def frames_of(scene, report=None):
+    fig = scene.fig
+    canvas = fig.canvas
+    for a in scene.animated:
+        a.set_animated(True)
+    canvas.draw()
+    background = canvas.copy_from_bbox(fig.bbox)
+    total = len(scene.frames)
+    for i in range(total):
+        scene.step(i)
+        canvas.restore_region(background)
+        for a in scene.animated:
+            if a.get_visible():
+                fig.draw_artist(a)
+        if report:
+            report(i, total)
+        yield np.asarray(canvas.buffer_rgba())
+
+
+def temp_path(suffix):
+    handle, path = tempfile.mkstemp(prefix="dwfs_", suffix=suffix)
+    os.close(handle)
+    return path
+
+
+def encode(scene, cfg, out, ffmpeg, report):
+    gif = out.lower().endswith(".gif")
+    target = temp_path(".mp4") if gif else out
+    proc = None
+    try:
+        for frame in frames_of(scene, report):
+            if proc is None:
+                h, w = frame.shape[:2]
+                proc = subprocess.Popen(
+                    [ffmpeg, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
+                     "-s", "%dx%d" % (w, h), "-r", str(cfg.fps), "-i", "-",
+                     "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libx264", "-preset", "fast",
+                     "-crf", "12" if gif else "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", target],
+                    stdin=subprocess.PIPE)
+            proc.stdin.write(frame.tobytes())
+        proc.stdin.close()
+        if proc.wait() != 0:
+            raise RuntimeError("ffmpeg could not encode the video")
+        if gif:
+            rate = min(cfg.fps, 20)
+            palette = temp_path(".png")
+            try:
+                subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", target, "-vf",
+                                "fps=%d,palettegen=max_colors=200:stats_mode=full" % rate, palette], check=True)
+                subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", target, "-i", palette, "-lavfi",
+                                "fps=%d[x];[x][1:v]paletteuse=dither=none:diff_mode=rectangle" % rate, out],
+                               check=True)
+            finally:
+                os.remove(palette)
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+        if gif and os.path.exists(target):
+            os.remove(target)
+    return out
+
+
 def draw(data, save=None, progress=False, **options):
     cfg = settings(DEFAULTS, options)
     m = model(data, cfg)
@@ -417,23 +487,27 @@ def draw(data, save=None, progress=False, **options):
         play(data, m, cfg)
         return None
 
-    scene = build(m, cfg)
+    save = os.fspath(save)
+    scene = build(m, cfg, offscreen=True)
     fig = scene.fig
-    if str(save).lower().endswith((".png", ".jpg", ".jpeg")):
+    if save.lower().endswith((".png", ".jpg", ".jpeg")):
         scene.step(len(scene.frames) - 1)
         fig.savefig(save, dpi=cfg.dpi, facecolor=fig.get_facecolor())
-        plt.close(fig)
         return save
 
-    anim = FuncAnimation(fig, scene.step, frames=len(scene.frames), init_func=lambda: scene.step(0),
-                         interval=1000 / cfg.fps, blit=False)
     mark = max(1, len(scene.frames) // 20)
 
     def report(i, total):
         if progress and i % mark == 0:
             print("frame", i, "of", total, flush=True)
 
-    anim.save(save, fps=cfg.fps, dpi=cfg.dpi, savefig_kwargs={"facecolor": fig.get_facecolor()},
-              progress_callback=report)
-    plt.close(fig)
+    ffmpeg = shutil.which(plt.rcParams["animation.ffmpeg_path"])
+    if ffmpeg:
+        return encode(scene, cfg, save, ffmpeg, report)
+    if not save.lower().endswith(".gif"):
+        raise ValueError("saving %s needs FFmpeg on your PATH, or save a .gif instead" % save)
+    anim = FuncAnimation(fig, scene.step, frames=len(scene.frames), init_func=lambda: scene.step(0),
+                         interval=1000 / cfg.fps, blit=False)
+    anim.save(save, writer="pillow", fps=min(cfg.fps, 20), dpi=cfg.dpi,
+              savefig_kwargs={"facecolor": fig.get_facecolor()}, progress_callback=report)
     return save
