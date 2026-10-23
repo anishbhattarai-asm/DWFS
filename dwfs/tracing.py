@@ -290,10 +290,34 @@ def save_json(data, out):
         json.dump(data, f)
 
 
+def route_mask(mask, min_stroke, retrace_cost):
+    skel = clean(skeletonize(mask > 0), min_stroke)
+    xy, a, b = pixel_graph(skel)
+    if not len(a):
+        raise ValueError("no lines found in the image")
+    return route(xy, a, b, retrace_cost)
+
+
+def package(walk, cuts, stats, w, h, mode, source, resample, title=None, fill=False):
+    count = int(resample) if fill else min(resample, len(walk))
+    path = resample_closed(walk, count)
+    stats["route"] = float(np.hypot(*np.diff(np.vstack([walk, walk[:1]]), axis=0).T).sum())
+    data = {"width": w, "height": h, "closed": True, "mode": mode, "source": source,
+            "stats": {key: round(value, 1) for key, value in stats.items()},
+            "lift": lift_ranges(walk, cuts, count),
+            "path": [[round(float(x), 2), round(float(y), 2)] for x, y in path]}
+    if title:
+        data["title"] = title
+    return data
+
+
 def trace(image, out=None, **options):
     cfg = settings(DEFAULTS, options, LIMITS)
     if int(cfg.block) % 2 == 0:
         raise ValueError("block must be an odd number, got %r" % cfg.block)
+    if isinstance(image, (str, os.PathLike)) and os.fspath(image).lower().endswith(".svg"):
+        from .vector import svg
+        return svg(image, out, resample=cfg.resample)
     img = read_image(image)
     scale = min(1.0, cfg.maxdim / max(img.shape[:2]))
     size = (max(1, int(img.shape[1] * scale)), max(1, int(img.shape[0] * scale)))
@@ -305,21 +329,9 @@ def trace(image, out=None, **options):
         raise ValueError("mode must be auto, lines or photo")
     mode = cfg.mode if cfg.mode != "auto" else ("lines" if is_line_art(gray, cfg) else "photo")
     bw = binarize(gray, cfg) if mode == "lines" else edges(img, cfg)
-    skel = clean(skeletonize(bw > 0), cfg.min_stroke)
-    xy, a, b = pixel_graph(skel)
-    if not len(a):
-        raise ValueError("no lines found in the image")
-
-    walk, cuts, stats = route(xy, a, b, cfg.retrace_cost)
-    count = min(cfg.resample, len(walk))
-    path = resample_closed(walk, count)
-    stats["route"] = float(np.hypot(*np.diff(np.vstack([walk, walk[:1]]), axis=0).T).sum())
+    walk, cuts, stats = route_mask(bw, cfg.min_stroke, cfg.retrace_cost)
     source = os.path.abspath(os.fspath(image)) if isinstance(image, (str, os.PathLike)) else None
-
-    data = {"width": w, "height": h, "closed": True, "mode": mode, "source": source,
-            "stats": {key: round(value, 1) for key, value in stats.items()},
-            "lift": lift_ranges(walk, cuts, count),
-            "path": [[round(float(x), 2), round(float(y), 2)] for x, y in path]}
+    data = package(walk, cuts, stats, w, h, mode, source, cfg.resample)
     if out:
         save_json(data, out)
     return data
