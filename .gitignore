@@ -9,3 +9,4 @@ path.json
 tsp.json
 *.mp4
 *.gif
+!docs/*.gif

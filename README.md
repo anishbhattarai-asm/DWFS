@@ -1,95 +1,171 @@
 # DWFS: Draw With Fourier Series
 
 [![PyPI](https://img.shields.io/pypi/v/dwfs)](https://pypi.org/project/dwfs/)
+[![Python](https://img.shields.io/pypi/pyversions/dwfs)](https://pypi.org/project/dwfs/)
+[![License](https://img.shields.io/pypi/l/dwfs)](https://github.com/anishbhattarai-asm/DWFS/blob/main/LICENSE)
 [![Tests](https://github.com/anishbhattarai-asm/DWFS/actions/workflows/tests.yml/badge.svg)](https://github.com/anishbhattarai-asm/DWFS/actions/workflows/tests.yml)
 
-Turn any picture into a single continuous line and redraw it with spinning circles.
+**Turn any picture into one continuous line, then watch spinning circles draw it.**
 
-![Fourier epicycles drawing a horse as N grows](https://raw.githubusercontent.com/anishbhattarai-asm/DWFS/main/docs/preview.png)
+![Two chains of circles drawing a horse while N grows](https://raw.githubusercontent.com/anishbhattarai-asm/DWFS/main/docs/demo.gif)
 
-DWFS traces an image into one closed path, takes its Fourier series, and animates the
-epicycles that rebuild it. Two chains of circles drive the pen, one for x and one for y,
-while the number of terms N grows from a rough loop to the exact drawing.
+```
+pip install dwfs
+dwfs make photo.jpg
+```
+
+That is all it takes. DWFS traces the picture into a single closed path, works out its
+Fourier series, and opens a window where two chains of circles redraw it, sharpening from
+a rough loop into the exact drawing.
 
 ## Features
 
-* Works with line drawings and with photos, flags and logos, detected automatically
-* One continuous route that follows the strokes instead of jumping across the picture
-* The pen lifts over the short gaps between separate pieces, so no stray lines are drawn
-* Separate x and y epicycle chains with dashed guides to the pen
-* N grows pass by pass with a live approximation error readout
-* Formulas typeset with real LaTeX when a TeX install is available
-* Faint tint of the source image behind the drawing, light and dark themes
-* Live window, or export to MP4, GIF or a single PNG frame
-* Usable from the command line or as a Python library
+* Works with line drawings, photos, logos and flags, and detects which kind it was given
+* Traces one continuous route along the strokes instead of jumping across the picture
+* Lifts the pen over the short gaps between separate pieces, so no stray lines appear
+* Draws with separate x and y circle chains joined to the pen by dashed guides
+* Grows the number of terms N pass by pass and shows the approximation error live
+* Typesets the formulas with real LaTeX when a TeX install is found
+* Shows a faint tint of the source picture behind the drawing, in a light or dark theme
+* Plays in a live window, or exports MP4, GIF or a single PNG frame
+* Runs from the command line or as a Python library
 
-## Install
+## Quick start
 
-Python 3.10 or newer.
+**1. Install.** Python 3.10 or newer.
 
 ```
 pip install dwfs
 ```
 
-Exporting video needs [FFmpeg](https://ffmpeg.org) on your PATH.
+Exporting MP4 needs [FFmpeg](https://ffmpeg.org) on your PATH. GIF and PNG work without it.
+
+**2. Draw something.**
+
+```
+dwfs make photo.jpg
+```
+
+A window opens and the drawing begins. Press space to pause, close the window to stop.
+
+**3. Save it.** Add an output file and DWFS renders to it instead of opening a window.
+
+```
+dwfs make photo.jpg photo.mp4
+dwfs make photo.jpg photo.gif
+dwfs make photo.jpg photo.png
+```
+
+A `.png` or `.jpg` saves only the finished frame, which is handy for a quick preview.
+
+**4. Tune it.** Every setting can be added as `key=value`.
+
+```
+dwfs make photo.jpg photo.mp4 theme=dark label="My Portrait"
+dwfs make logo.png logo.gif style=classic grow=false
+```
+
+Run `dwfs options` to see every setting with its default.
+
+## What you are looking at
+
+* **The chain on top** is the Fourier series for x. Its tip sets how far left or right the pen is.
+* **The chain on the left** is the series for y. Its tip sets how high the pen is.
+* **The dashed guides** carry both tips to the pen, which draws the black line.
+* **N** is how many circles each chain uses. It starts at 1 and grows each pass until
+  every frequency in the path is included, at which point the drawing is exact.
+* **The approximation error** is the share of the picture's detail still missing. It falls
+  to 0% at the full N.
+* **A hollow pen** means the pen is lifted while it crosses a gap between separate pieces.
+
+With `style=classic` the picture is drawn by a single chain of rotating complex circles
+instead, the classic Fourier epicycle look.
+
+## Getting good results
+
+* **Line drawings** give the cleanest result. Dark strokes on a plain light background are
+  recognized automatically and traced along their centers.
+* **Photos** work best with a plain background and clear lighting. Lower `canny_low` and
+  `canny_high` to keep more edges, raise them to keep fewer.
+* **Too much clutter**, such as hair or grass turning into small loops: raise `min_stroke`,
+  or trace with `mode=photo`.
+* **More detail**: raise `resample`, for example `resample=10000`. Rendering gets slower.
+* **Faster renders**: use `grow=false` to draw only the full series, or lower
+  `stage_frames` and `frames`.
+* **Tonal pictures** with lots of shading can look better as a stipple path, described
+  under Stipple paths below.
 
 ## Command line
 
 ```
-dwfs make portrait.jpg
+dwfs make IMAGE [OUT] [key=value ...]       trace an image and animate it
+dwfs trace IMAGE [JSON] [key=value ...]     trace an image into a path file
+dwfs draw [JSON] [OUT] [key=value ...]      animate a path file
+dwfs stipple IMAGE [JSON] [key=value ...]   build a stipple path for tonal images
+dwfs options                                list every setting with its default
+dwfs help                                   show the usage
 ```
 
-That traces the image and opens the animation. Press space to pause. Give a second file to
-export instead:
+`JSON` defaults to `path.json`. Leaving out `OUT` opens a live window. Tracing once and
+drawing many times is quicker when you are trying out drawing settings:
 
 ```
-dwfs make portrait.jpg portrait.mp4
-dwfs make portrait.jpg portrait.gif
-dwfs make portrait.jpg portrait.png
+dwfs trace photo.jpg photo.json
+dwfs draw photo.json photo.mp4 theme=dark
+dwfs draw photo.json photo.gif style=classic
 ```
 
-A `.png` or `.jpg` saves the finished frame. Tracing and drawing can also run as separate
-steps, with the path kept in a JSON file in between:
-
-```
-dwfs trace portrait.jpg portrait.json
-dwfs draw portrait.json portrait.mp4
-```
-
-Any setting can be added as `key=value`:
-
-```
-dwfs make logo.png logo.mp4 theme=dark style=classic
-dwfs trace sketch.png sketch.json mode=lines resample=8000
-dwfs draw sketch.json sketch.gif grow=false label="My Sketch"
-```
-
-`dwfs options` lists every setting with its default, and `dwfs help` shows the usage.
-Without installing, `python -m dwfs` works the same from the repository folder.
+Settings take numbers, text, `true` or `false` (also `yes`, `no`, `on`, `off`), or `none`
+to clear one. Without installing, `python -m dwfs` works the same from the repository folder.
 
 ## Python
 
 ```python
 import dwfs
 
-path = dwfs.trace("portrait.jpg")
-dwfs.draw(path, "portrait.mp4", theme="dark")
+path = dwfs.trace("photo.jpg")
+dwfs.draw(path)
+dwfs.draw(path, "photo.mp4", theme="dark")
 ```
 
-`trace` takes a file path, a NumPy array or a PIL image and returns the path as a plain
-dict, which is also written to JSON when you pass a second argument. `draw` takes that dict
-or a JSON file and shows a window, or saves to the file you give it. In a notebook,
-`dwfs.animate(path)` returns the matplotlib animation so you can embed it:
+* `dwfs.trace(image, out=None, **settings)` traces a file path, a NumPy array (RGB or
+  grayscale) or a PIL image, and returns the path as a dict. Pass `out` to also save it
+  as JSON.
+* `dwfs.draw(path, save=None, progress=False, **settings)` takes that dict or a JSON file.
+  With `save` it writes an `.mp4`, `.gif`, `.png` or `.jpg` and returns the file name,
+  without it a live window opens. `progress=True` prints rendering progress.
+* `dwfs.animate(path, **settings)` returns the matplotlib animation, useful in notebooks:
+
+  ```python
+  from IPython.display import HTML
+
+  HTML(dwfs.animate(path, grow=False, frames=300).to_jshtml())
+  ```
+
+* `dwfs.stipple(image, out=None, **settings)` builds a stipple path, described below.
+
+### Drawing your own paths
+
+`draw` accepts any dict with a `width`, a `height` and a `path` of points in pixel
+coordinates, where y grows downward. This draws a heart from its formula:
 
 ```python
-from IPython.display import HTML
+import numpy as np
+import dwfs
 
-HTML(dwfs.animate(path, grow=False, frames=300).to_jshtml())
+t = np.linspace(0, 2 * np.pi, 2000, endpoint=False)
+x = 16 * np.sin(t) ** 3
+y = 13 * np.cos(t) - 5 * np.cos(2 * t) - 2 * np.cos(3 * t) - np.cos(4 * t)
+path = {"width": 40, "height": 40, "path": [[20 + a, 20 - b] for a, b in zip(x, y)]}
+dwfs.draw(path, label="Heart")
 ```
 
-`dwfs.stipple(image)` builds the alternative stipple path described below.
+Paths made by `trace` also carry `lift`, a list of `[first, last]` point index ranges where
+the pen is lifted, and `source`, the image used for the background tint.
 
 ## How it works
+
+![The drawing at N = 3, N = 18 and the full N](https://raw.githubusercontent.com/anishbhattarai-asm/DWFS/main/docs/preview.png)
 
 1. **Find the lines.** Line art is recognized by its plain background and thin dark strokes,
    and is traced along the strokes. Anything else is smoothed with a bilateral filter and
@@ -101,13 +177,13 @@ HTML(dwfs.animate(path, grow=False, frames=300).to_jshtml())
    undrawn part. Pieces that do not touch are joined by the shortest gap, and those gaps are
    marked so the pen lifts over them.
 4. **Take the Fourier series.** The path is resampled evenly and transformed with the FFT.
-   Each axis becomes a real series
-   `x_N(t) = a_0 + sum of (a_k cos kt + b_k sin kt)` for k from 1 to N,
-   and likewise for y.
-5. **Animate.** Each term is a circle turning k times per cycle. The circles of the x chain
-   sit above the picture and those of the y chain sit to its left. Every pass adds more terms
-   until all of them are in. The error shown is the share of the picture's energy held by the
-   terms still missing.
+   Each axis becomes a real series, for x
+
+   `x_N(t) = a_0 + sum over k = 1..N of (a_k cos kt + b_k sin kt)`
+
+   and the same for y.
+5. **Animate.** Each term is a circle turning k times per cycle. Every pass adds more terms
+   until all of them are in.
 
 ## Settings
 
@@ -136,6 +212,31 @@ HTML(dwfs.animate(path, grow=False, frames=300).to_jshtml())
 * `latex` uses real LaTeX for the formulas when it is available
 * `fps` and `dpi` for exports
 
+### Stipple
+
+* `points` is how many dots make up the path, default 8000
+* `relax` is how many Voronoi relaxation rounds spread the dots evenly
+* `seconds` is the time limit for improving the tour
+* `gamma` and `white_cutoff` shape how darkness turns into dot density
+* `maxdim` is the size the image is scaled down to, default 400
+* `knn` is how many neighbors each dot considers while improving the tour
+* `seed` makes the result repeatable
+
+## Stipple paths
+
+For pictures with lots of shading there is a second way to build the path. It scatters
+points by darkness, relaxes them with Voronoi iterations, and joins them into one tour that
+is refined by swapping crossing edges. The result is the classic single line maze look.
+
+```
+dwfs stipple photo.jpg photo.json points=8000 seconds=15
+dwfs draw photo.json
+```
+
+The same tool also runs in the browser: open
+[`web/index.html`](https://github.com/anishbhattarai-asm/DWFS/blob/main/web/index.html),
+load an image, press Build, then Download JSON.
+
 ## LaTeX
 
 With a TeX distribution such as MiKTeX or TeX Live that matplotlib can use for usetex, the
@@ -143,19 +244,17 @@ formulas are typeset by LaTeX itself. Otherwise they fall back to matplotlib mat
 same Computer Modern style, so everything still runs without TeX. The first LaTeX run is slow
 while fonts are generated. After that it is cached.
 
-## Stipple alternative
+## Troubleshooting
 
-For tonal images there is a second way to build the path. It scatters points by darkness,
-relaxes them with Voronoi iterations, and joins them into one tour that is refined by
-swapping crossing edges. The result is the classic single line maze look.
-
-```
-dwfs stipple photo.jpg photo.json points=8000 seconds=15
-dwfs draw photo.json
-```
-
-The same tool runs in the browser too: open `web/index.html`, load an image, press Build,
-then Download JSON.
+* **MP4 export fails with a message about ffmpeg.** Install [FFmpeg](https://ffmpeg.org)
+  and make sure it is on your PATH, or export a `.gif` instead.
+* **The first run with LaTeX seems stuck.** MiKTeX may be waiting to install missing
+  packages or building fonts. Let it finish, or draw with `latex=false`.
+* **The drawing has too many tiny loops.** Raise `min_stroke`, lower `maxdim`, or try the
+  other `mode`.
+* **Another tool broke after installing.** DWFS depends on `opencv-python`. If you also have
+  `opencv-python-headless` or `opencv-contrib-python`, they share one `cv2` folder, so
+  install all of them at the same version.
 
 ## Development
 
@@ -168,10 +267,11 @@ pytest
 
 ## Releasing
 
-Releases go to PyPI automatically. Raise `__version__` in `dwfs/__init__.py`, push, then
-publish a GitHub release whose tag is that version with a `v` in front, such as `v0.2.0`.
-The publish workflow runs the tests, checks the tag against the version, builds the package
-and uploads it through PyPI trusted publishing, so no token is stored anywhere.
+Releases go to PyPI automatically. Raise `__version__` in `dwfs/__init__.py`, add the
+changes to `CHANGELOG.md`, push, then publish a GitHub release whose tag is that version
+with a `v` in front, such as `v0.2.0`. The publish workflow runs the tests, checks the tag
+against the version, builds the package and uploads it through PyPI trusted publishing, so
+no token is stored anywhere.
 
 ## Project layout
 
@@ -182,8 +282,8 @@ dwfs/stipple.py    stipple path for tonal images
 dwfs/cli.py        the dwfs command
 web/index.html     stipple path in the browser
 tests/             test suite
+docs/              README images
 .github/           test and publish workflows
-docs/              README preview
 ```
 
 ## License
