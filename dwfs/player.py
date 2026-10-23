@@ -7,12 +7,13 @@ import shutil
 import tempfile
 import threading
 import subprocess
+from types import SimpleNamespace
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.transforms import Bbox
 from matplotlib.widgets import Button
 
-from .drawing import build, layout
+from .drawing import TARGETS, build, layout, model
 
 BAND = 0.62
 KEYS = {
@@ -20,10 +21,12 @@ KEYS = {
     "keymap.home": ["home"],
     "keymap.back": ["backspace"],
     "keymap.forward": [],
+    "keymap.save": ["ctrl+s"],
 }
 HELP = "\n".join([
     "space          pause or play",
     "left, right    step one frame",
+    ",  .           previous or next N",
     "up, down       faster or slower",
     "0              start over",
     "scroll         zoom where the mouse is",
@@ -31,6 +34,8 @@ HELP = "\n".join([
     "m              show or hide the lens",
     "f              change what the lens follows",
     "[  ]           zoom the lens out or in",
+    "t              light or dark theme",
+    "s              two chains or one chain",
     "h              hide this help",
 ])
 KINDS = {".mp4": "MP4 video", ".gif": "GIF animation", ".png": "PNG image"}
@@ -79,14 +84,31 @@ def free_name(stem, ext):
 
 class Player:
     def __init__(self, scene, data, cfg):
-        self.s, self.data, self.cfg = scene, data, cfg
+        self.data, self.cfg = data, cfg
         self.fig = scene.fig
-        self.total = len(scene.frames)
         self.pos, self.speed, self.playing = 0.0, 1.0, True
         self.dragging = False
         self.regions, self.backgrounds = [], []
+        self.buttons = {}
         self.job = None
         self.note_text, self.note_until = "", 0.0
+        canvas = self.fig.canvas
+        canvas.mpl_connect("draw_event", self.on_draw)
+        canvas.mpl_connect("close_event", self.on_close)
+        canvas.mpl_connect("key_press_event", self.on_key)
+        canvas.mpl_connect("scroll_event", self.on_scroll)
+        canvas.mpl_connect("button_press_event", self.on_press)
+        canvas.mpl_connect("motion_notify_event", self.on_motion)
+        canvas.mpl_connect("button_release_event", self.on_release)
+        self.mount(scene)
+        self.timer = canvas.new_timer(interval=max(1, int(1000 / cfg.fps)))
+        self.timer.add_callback(self.tick)
+        self.timer.start()
+
+    def mount(self, scene):
+        self.s = scene
+        self.total = len(scene.frames)
+        self.regions, self.backgrounds = [], []
         theme = scene.theme
         fig = self.fig
         tall = scene.layout.fig_h
@@ -96,54 +118,64 @@ class Player:
         self.timeline.set_ylim(0, 1)
         self.timeline.axis("off")
         self.timeline.plot([0, 1], [0.5, 0.5], color=theme["text"], alpha=0.25, lw=3, solid_capstyle="round")
-        starts = [i for i in range(1, self.total) if scene.frames[i][0] != scene.frames[i - 1][0]]
+        starts = self.starts()[1:]
         self.timeline.plot([i / self.total for i in starts], [0.5] * len(starts), "|", color=theme["text"],
                            alpha=0.35, ms=6)
         self.bar, = self.timeline.plot([], [], color=theme["accent"], lw=3, solid_capstyle="round")
         self.knob, = self.timeline.plot([], [], "o", color=theme["accent"], ms=8)
 
-        actions = [("Pause", self.toggle), ("Restart", self.restart), ("Slower", self.slower),
-                   ("Faster", self.faster), ("Lens", self.toggle_lens), ("Follow", self.follow),
-                   ("Reset", self.reset_view), ("MP4", lambda e: self.save(".mp4")),
-                   ("GIF", lambda e: self.save(".gif")), ("PNG", lambda e: self.save(".png")),
-                   ("Keys", self.toggle_help)]
+        actions = [("Pause", self.toggle), ("Slower", self.slower), ("Faster", self.faster),
+                   ("Lens", self.toggle_lens), ("Follow", self.follow), ("Reset", self.reset_view),
+                   ("Theme", self.toggle_theme), ("Style", self.toggle_style),
+                   ("MP4", lambda e: self.save(".mp4")), ("GIF", lambda e: self.save(".gif")),
+                   ("PNG", lambda e: self.save(".png")), ("Keys", self.toggle_help)]
         width = 0.92 / len(actions)
+        for button in self.buttons.values():
+            button.disconnect_events()
         self.buttons = {}
         for i, (name, action) in enumerate(actions):
             bax = fig.add_axes([0.04 + i * width + 0.003, 0.08 / tall, width - 0.006, 0.3 / tall])
             button = Button(bax, name, color=theme["button"], hovercolor=theme["hover"])
             button.label.set_color(theme["text"])
-            button.label.set_fontsize(9)
+            button.label.set_fontsize(8.5)
             for spine in bax.spines.values():
                 spine.set_visible(False)
             button.on_clicked(action)
             self.buttons[name] = button
+        self.buttons["Pause"].label.set_text("Pause" if self.playing else "Play")
 
-        self.help = fig.text(0.5, 0.55, HELP, ha="center", va="center", ma="left", family="monospace", fontsize=10,
-                             color=theme["text"], visible=False, zorder=20,
+        self.help = fig.text(0.5, 0.55, HELP, ha="center", va="center", ma="left", family="monospace",
+                             fontsize=10, color=theme["text"], visible=False, zorder=20,
                              bbox={"boxstyle": "round,pad=0.8", "facecolor": theme["panel"],
                                    "edgecolor": theme["accent"], "alpha": 0.96})
         self.top_artists = scene.animated + [self.help]
         self.line_artists = [self.bar, self.knob]
         for a in self.top_artists + self.line_artists:
             a.set_animated(True)
-
-        canvas = fig.canvas
-        canvas.mpl_connect("draw_event", self.on_draw)
-        canvas.mpl_connect("close_event", self.on_close)
-        canvas.mpl_connect("key_press_event", self.on_key)
-        canvas.mpl_connect("scroll_event", self.on_scroll)
-        canvas.mpl_connect("button_press_event", self.on_press)
-        canvas.mpl_connect("motion_notify_event", self.on_motion)
-        canvas.mpl_connect("button_release_event", self.on_release)
         try:
-            canvas.manager.set_window_title("DWFS" + ("   " + scene.label if scene.label else ""))
+            fig.canvas.manager.set_window_title("DWFS" + ("   " + scene.label if scene.label else ""))
         except Exception:
             pass
-        self.s.step(0)
-        self.timer = canvas.new_timer(interval=max(1, int(1000 / cfg.fps)))
-        self.timer.add_callback(self.tick)
-        self.timer.start()
+        self.s.step(min(int(self.pos), self.total - 1))
+
+    def restyle(self, **changes):
+        cfg = SimpleNamespace(**{**vars(self.cfg), **changes})
+        place = self.pos / max(1, self.total - 1)
+        lens = self.s.lens
+        name = self.s.targets[lens["target"]]
+        m = model(self.data, cfg) if "style" in changes else self.s.model
+        cfg.lens, cfg.zoom = lens["on"], lens["zoom"]
+        cfg.follow = name if name in TARGETS[cfg.style] else "auto"
+        self.cfg = cfg
+        for button in self.buttons.values():
+            button.disconnect_events()
+        self.mount(build(m, cfg, controls=BAND, figure=self.fig))
+        self.pos = place * (self.total - 1)
+        self.fig.canvas.draw_idle()
+
+    def starts(self):
+        frames = self.s.frames
+        return [0] + [i for i in range(1, self.total) if frames[i][0] != frames[i - 1][0]]
 
     def on_draw(self, event):
         canvas = self.fig.canvas
@@ -226,14 +258,30 @@ class Player:
         x0, x1, y0, y1 = self.s.home
         self.s.ax.set_xlim(x0, x1)
         self.s.ax.set_ylim(y0, y1)
-        self.s.lens["zoom"] = float(self.cfg.zoom)
+        self.s.lens["zoom"] = 1.0
         self.fig.canvas.draw_idle()
+
+    def toggle_theme(self, event=None):
+        self.restyle(theme="dark" if self.cfg.theme == "light" else "light")
+
+    def toggle_style(self, event=None):
+        self.restyle(style="classic" if self.cfg.style == "axes" else "axes")
 
     def toggle_help(self, event=None):
         self.help.set_visible(not self.help.get_visible())
 
     def lens_zoom(self, factor):
         self.s.lens["zoom"] = min(200.0, max(0.05, self.s.lens["zoom"] * factor))
+
+    def jump(self, direction):
+        starts = self.starts()
+        here = int(self.pos)
+        if direction > 0:
+            later = [i for i in starts if i > here]
+            self.pos = float(later[0] if later else starts[-1])
+        else:
+            earlier = [i for i in starts if i < here - 3]
+            self.pos = float(earlier[-1] if earlier else 0)
 
     def on_key(self, event):
         key = event.key
@@ -243,6 +291,10 @@ class Player:
             if self.playing:
                 self.toggle()
             self.pos = (int(self.pos) + (1 if key == "right" else -1)) % self.total
+        elif key == ".":
+            self.jump(1)
+        elif key == ",":
+            self.jump(-1)
         elif key == "up":
             self.faster()
         elif key == "down":
@@ -259,6 +311,10 @@ class Player:
             self.lens_zoom(1.5)
         elif key == "[":
             self.lens_zoom(1 / 1.5)
+        elif key == "t":
+            self.toggle_theme()
+        elif key == "s":
+            self.toggle_style()
         elif key == "h":
             self.toggle_help()
 
