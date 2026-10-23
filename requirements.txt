@@ -1,5 +1,6 @@
-numpy
-matplotlib
-opencv-python
-scikit-image
-scipy
+numpy>=1.21
+matplotlib>=3.5
+opencv-python>=4.5
+scikit-image>=0.19
+scipy>=1.7
+Pillow>=9.0

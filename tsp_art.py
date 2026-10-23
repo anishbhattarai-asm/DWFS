@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 import time
@@ -167,7 +168,7 @@ def main():
 
     path = pts[order]
     length = float(np.sum(np.hypot(np.diff(path[:, 0]), np.diff(path[:, 1]))))
-    data = {"width": w, "height": h, "closed": True,
+    data = {"width": w, "height": h, "closed": True, "source": os.path.abspath(src),
             "path": [[round(float(x), 2), round(float(y), 2)] for x, y in path]}
     with open(out, "w") as f:
         json.dump(data, f)
