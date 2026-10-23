@@ -1,5 +1,8 @@
 # DWFS: Draw With Fourier Series
 
+[![PyPI](https://img.shields.io/pypi/v/dwfs)](https://pypi.org/project/dwfs/)
+[![Tests](https://github.com/anishbhattarai-asm/DWFS/actions/workflows/tests.yml/badge.svg)](https://github.com/anishbhattarai-asm/DWFS/actions/workflows/tests.yml)
+
 Turn any picture into a single continuous line and redraw it with spinning circles.
 
 ![Fourier epicycles drawing a horse as N grows](https://raw.githubusercontent.com/anishbhattarai-asm/DWFS/main/docs/preview.png)
@@ -22,7 +25,7 @@ while the number of terms N grows from a rough loop to the exact drawing.
 
 ## Install
 
-Python 3.9 or newer.
+Python 3.10 or newer.
 
 ```
 pip install dwfs
@@ -163,6 +166,13 @@ pip install -e ".[test]"
 pytest
 ```
 
+## Releasing
+
+Releases go to PyPI automatically. Raise `__version__` in `dwfs/__init__.py`, push, then
+publish a GitHub release whose tag is that version with a `v` in front, such as `v0.2.0`.
+The publish workflow runs the tests, checks the tag against the version, builds the package
+and uploads it through PyPI trusted publishing, so no token is stored anywhere.
+
 ## Project layout
 
 ```
@@ -172,6 +182,7 @@ dwfs/stipple.py    stipple path for tonal images
 dwfs/cli.py        the dwfs command
 web/index.html     stipple path in the browser
 tests/             test suite
+.github/           test and publish workflows
 docs/              README preview
 ```
 
