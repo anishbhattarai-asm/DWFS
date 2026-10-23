@@ -1,13 +1,18 @@
 # Changelog
 
-## 0.1.1
+## 0.2.0
 
-* README rewritten as a full guide: animated demo, quick start, an explanation of what is
-  on screen, tips for good results, a Python API reference, drawing your own paths, and
-  troubleshooting
-* Stipple settings documented
-* Richer PyPI metadata: supported Python versions, topics and project links
-* Changelog added
+* Interactive window: a timeline you can click or drag, buttons for play, pause, restart,
+  speed, lens, follow and reset, keyboard shortcuts, and mouse wheel zoom
+* Save to MP4, GIF or PNG straight from the window, rendered in the background with progress
+* A zoom lens that follows the tip of a chain or the pen, with its own zoom
+* An arrow on every arm, x and y chains in their own colors, circles that fade as they shrink
+* The window sizes itself to fit the screen, so the formulas no longer overlap
+* Long labels shrink to fit beside N
+* New `contrast` tracing setting that recovers soft photo outlines such as a jaw
+* New `lens`, `follow` and `zoom` drawing settings
+* README rewritten as a full guide with an animated demo, tips, a Python API reference,
+  drawing your own paths and troubleshooting, plus richer PyPI metadata and this changelog
 
 ## 0.1.0
 

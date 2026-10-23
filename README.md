@@ -23,11 +23,13 @@ a rough loop into the exact drawing.
 * Works with line drawings, photos, logos and flags, and detects which kind it was given
 * Traces one continuous route along the strokes instead of jumping across the picture
 * Lifts the pen over the short gaps between separate pieces, so no stray lines appear
-* Draws with separate x and y circle chains joined to the pen by dashed guides
+* Draws with separate x and y circle chains, an arrow on every arm, joined to the pen by
+  dashed guides
 * Grows the number of terms N pass by pass and shows the approximation error live
+* A zoom lens follows the tiny circles at the end of a chain so you can see them work
+* An interactive window with a timeline, play controls and one click saving to MP4, GIF or PNG
 * Typesets the formulas with real LaTeX when a TeX install is found
 * Shows a faint tint of the source picture behind the drawing, in a light or dark theme
-* Plays in a live window, or exports MP4, GIF or a single PNG frame
 * Runs from the command line or as a Python library
 
 ## Quick start
@@ -46,7 +48,8 @@ Exporting MP4 needs [FFmpeg](https://ffmpeg.org) on your PATH. GIF and PNG work 
 dwfs make photo.jpg
 ```
 
-A window opens and the drawing begins. Press space to pause, close the window to stop.
+A window opens and the drawing begins. The buttons along the bottom play, pause, change the
+speed and save the animation, as described under The interactive window below.
 
 **3. Save it.** Add an output file and DWFS renders to it instead of opening a window.
 
@@ -69,17 +72,54 @@ Run `dwfs options` to see every setting with its default.
 
 ## What you are looking at
 
-* **The chain on top** is the Fourier series for x. Its tip sets how far left or right the pen is.
-* **The chain on the left** is the series for y. Its tip sets how high the pen is.
+* **The blue chain on top** is the Fourier series for x. Its tip sets how far left or right
+  the pen is.
+* **The red chain on the left** is the series for y. Its tip sets how high the pen is.
+* **Each arrow** is one term of the series, a vector turning k times per cycle. The circle
+  around it shows its whole path.
 * **The dashed guides** carry both tips to the pen, which draws the black line.
 * **N** is how many circles each chain uses. It starts at 1 and grows each pass until
   every frequency in the path is included, at which point the drawing is exact.
 * **The approximation error** is the share of the picture's detail still missing. It falls
   to 0% at the full N.
 * **A hollow pen** means the pen is lifted while it crosses a gap between separate pieces.
+* **The lens** in the top left corner is a magnified view of the dashed square, which follows
+  the tip of a chain so the smallest circles are visible.
 
 With `style=classic` the picture is drawn by a single chain of rotating complex circles
 instead, the classic Fourier epicycle look.
+
+## The interactive window
+
+When no output file is given, DWFS opens a window with a timeline and a row of buttons.
+
+* **Timeline**: click or drag anywhere on it to jump through the animation. The small marks
+  are the points where N grows.
+* **Pause** and **Restart**, **Slower** and **Faster** control playback.
+* **Lens** shows or hides the magnifier, and **Follow** switches it between the x chain, the y
+  chain and the pen.
+* **Reset** undoes any zooming.
+* **MP4**, **GIF** and **PNG** ask where to save, then render in the background with the same
+  settings and lens you are looking at, while the window keeps playing. Progress shows in
+  the bottom right corner.
+* **Keys** lists the keyboard shortcuts.
+
+The mouse wheel zooms the picture around the pointer, and zooms the lens when the pointer
+is over it. Keyboard shortcuts:
+
+```
+space         pause or play
+left, right   step one frame
+up, down      faster or slower
+0             start over
+r             reset the zoom
+m             show or hide the lens
+f             change what the lens follows
+[  ]          zoom the lens out or in
+h             show or hide the help
+```
+
+The window sizes itself to fit your screen.
 
 ## Getting good results
 
@@ -87,6 +127,10 @@ instead, the classic Fourier epicycle look.
   recognized automatically and traced along their centers.
 * **Photos** work best with a plain background and clear lighting. Lower `canny_low` and
   `canny_high` to keep more edges, raise them to keep fewer.
+* **Part of an outline is missing in a photo**, such as a jaw or cheek: that edge is too soft,
+  usually skin against a background of similar brightness or a jaw shaded into the neck. Add
+  `contrast=1.5` to boost local contrast before edges are found. It also brings out more
+  texture, so it is off by default.
 * **Too much clutter**, such as hair or grass turning into small loops: raise `min_stroke`,
   or trace with `mode=photo`.
 * **More detail**: raise `resample`, for example `resample=10000`. Rendering gets slower.
@@ -133,7 +177,7 @@ dwfs.draw(path, "photo.mp4", theme="dark")
   as JSON.
 * `dwfs.draw(path, save=None, progress=False, **settings)` takes that dict or a JSON file.
   With `save` it writes an `.mp4`, `.gif`, `.png` or `.jpg` and returns the file name,
-  without it a live window opens. `progress=True` prints rendering progress.
+  without it the interactive window opens. `progress=True` prints rendering progress.
 * `dwfs.animate(path, **settings)` returns the matplotlib animation, useful in notebooks:
 
   ```python
@@ -193,6 +237,7 @@ the pen is lifted, and `source`, the image used for the background tint.
 * `maxdim` is the size the image is scaled down to before tracing, default 820
 * `block` and `c` set how much fine detail such as hair is kept in line art
 * `canny_low` and `canny_high` set how many edges are kept in photos. Lower keeps more
+* `contrast` boosts local contrast in photos before finding edges, 0 is off, try 1.5
 * `line_art` and `background` tune the automatic line art detection
 * `min_stroke` drops specks and spurs shorter than this many pixels
 * `resample` is the number of points in the final path, default 6000
@@ -209,6 +254,8 @@ the pen is lifted, and `source`, the image used for the background tint.
 * `ghost`, `ghost_alpha` and `image` control the background tint
 * `label` sets the caption, which defaults to the image file name
 * `lift` lifts the pen over gaps. With `false` the gaps are drawn as straight lines
+* `lens` shows the magnifier, `follow` picks what it follows (`auto`, `x`, `y` or `pen`) and
+  `zoom` multiplies its magnification
 * `latex` uses real LaTeX for the formulas when it is available
 * `fps` and `dpi` for exports
 
@@ -250,6 +297,8 @@ while fonts are generated. After that it is cached.
   and make sure it is on your PATH, or export a `.gif` instead.
 * **The first run with LaTeX seems stuck.** MiKTeX may be waiting to install missing
   packages or building fonts. Let it finish, or draw with `latex=false`.
+* **A jaw or cheek outline is missing from a photo.** Trace with `contrast=1.5`, see
+  Getting good results.
 * **The drawing has too many tiny loops.** Raise `min_stroke`, lower `maxdim`, or try the
   other `mode`.
 * **Another tool broke after installing.** DWFS depends on `opencv-python`. If you also have
@@ -279,6 +328,7 @@ no token is stored anywhere.
 dwfs/tracing.py    image to one continuous path
 dwfs/drawing.py    Fourier series and epicycle animation
 dwfs/stipple.py    stipple path for tonal images
+dwfs/player.py     the interactive window
 dwfs/cli.py        the dwfs command
 web/index.html     stipple path in the browser
 tests/             test suite
