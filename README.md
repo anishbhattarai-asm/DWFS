@@ -16,18 +16,27 @@ dwfs make photo.jpg
 
 That is all it takes. DWFS traces the picture into a single closed path, works out its
 Fourier series, and opens a window where two chains of circles redraw it, sharpening from
-a rough loop into the exact drawing.
+a rough loop into the exact drawing. It can also write words and draw SVG logos:
+
+```
+dwfs text "Hello World"
+dwfs make logo.svg
+```
 
 ## Features
 
 * Works with line drawings, photos, logos and flags, and detects which kind it was given
+* Draws SVG files from their exact vector outlines
+* Writes any text in one continuous line, as a single centerline or as letter outlines, in
+  any script your fonts cover, Nepali and other joined scripts included
 * Traces one continuous route along the strokes instead of jumping across the picture
 * Lifts the pen over the short gaps between separate pieces, so no stray lines appear
 * Draws with separate x and y circle chains, an arrow on every arm, joined to the pen by
   dashed guides
 * Grows the number of terms N pass by pass and shows the approximation error live
 * A zoom lens follows the tiny circles at the end of a chain so you can see them work
-* An interactive window with a timeline, play controls and one click saving to MP4, GIF or PNG
+* An interactive window with a timeline, play controls, live theme and style switching, and
+  one click saving to MP4, GIF or PNG
 * Typesets the formulas with real LaTeX when a TeX install is found
 * Shows a faint tint of the source picture behind the drawing, in a light or dark theme
 * Runs from the command line or as a Python library
@@ -95,10 +104,12 @@ When no output file is given, DWFS opens a window with a timeline and a row of b
 
 * **Timeline**: click or drag anywhere on it to jump through the animation. The small marks
   are the points where N grows.
-* **Pause** and **Restart**, **Slower** and **Faster** control playback.
+* **Pause**, **Slower** and **Faster** control playback.
 * **Lens** shows or hides the magnifier, and **Follow** switches it between the x chain, the y
   chain and the pen.
 * **Reset** undoes any zooming.
+* **Theme** switches between light and dark, and **Style** between the two chains and the
+  single classic chain, right in the window without losing your place.
 * **MP4**, **GIF** and **PNG** ask where to save, then render in the background with the same
   settings and lens you are looking at, while the window keeps playing. Progress shows in
   the bottom right corner.
@@ -110,16 +121,51 @@ is over it. Keyboard shortcuts:
 ```
 space         pause or play
 left, right   step one frame
+,  .          previous or next N
 up, down      faster or slower
 0             start over
 r             reset the zoom
 m             show or hide the lens
 f             change what the lens follows
 [  ]          zoom the lens out or in
+t             light or dark theme
+s             two chains or one chain
 h             show or hide the help
 ```
 
 The window sizes itself to fit your screen.
+
+## Text
+
+![Hello World being written by the circles](https://raw.githubusercontent.com/anishbhattarai-asm/DWFS/main/docs/text.png)
+
+```
+dwfs text "Hello World"
+dwfs text "Hello\nWorld" hello.mp4
+dwfs text "Anish" anish.gif stroke=outline font="Georgia"
+```
+
+The words are rendered with a font and turned into one continuous path, then drawn like
+any picture. `stroke=center`, the default, follows the middle of each letter, which reads
+like handwriting. `stroke=outline` traces around each letter instead. Write `\n` for a new
+line. `font` takes a font name or a font file, and by default DWFS picks an installed font
+that has every letter of your text. Nepali and other scripts whose letters join are shaped
+properly through Pillow. From Python, `dwfs.text("Hello")` returns the path.
+
+## SVG files
+
+```
+dwfs make logo.svg
+dwfs trace icon.svg icon.json
+```
+
+SVG files are read as vectors, so the path follows the exact curves with no tracing step.
+Paths with every command including arcs, rectangles, circles, ellipses, lines, polylines,
+polygons, groups with transforms and `use` references are all supported. Text, images,
+gradients and clip paths inside the SVG are ignored, so convert text to paths in your editor
+first. For safety, files with a DOCTYPE or entity declarations are refused, and files over
+20 MB are not read. From Python, `dwfs.svg("logo.svg")` returns the path, and it also
+accepts the SVG markup as a string.
 
 ## Getting good results
 
@@ -145,12 +191,14 @@ The window sizes itself to fit your screen.
 dwfs make IMAGE [OUT] [key=value ...]       trace an image and animate it
 dwfs trace IMAGE [JSON] [key=value ...]     trace an image into a path file
 dwfs draw [JSON] [OUT] [key=value ...]      animate a path file
+dwfs text WORDS [OUT] [key=value ...]       write words in one continuous line
 dwfs stipple IMAGE [JSON] [key=value ...]   build a stipple path for tonal images
 dwfs options                                list every setting with its default
 dwfs help                                   show the usage
 ```
 
-`JSON` defaults to `path.json`. Leaving out `OUT` opens a live window. Tracing once and
+`IMAGE` can be a photo, a drawing or an `.svg` file. `JSON` defaults to `path.json`. For
+`text`, an `OUT` ending in `.json` saves just the path. Leaving out `OUT` opens a live window. Tracing once and
 drawing many times is quicker when you are trying out drawing settings:
 
 ```
@@ -186,6 +234,8 @@ dwfs.draw(path, "photo.mp4", theme="dark")
   HTML(dwfs.animate(path, grow=False, frames=300).to_jshtml())
   ```
 
+* `dwfs.text(words, out=None, **settings)` turns words into a path, and
+  `dwfs.svg(file, out=None, resample=6000)` reads an SVG file or SVG markup.
 * `dwfs.stipple(image, out=None, **settings)` builds a stipple path, described below.
 
 ### Drawing your own paths
@@ -205,7 +255,8 @@ dwfs.draw(path, label="Heart")
 ```
 
 Paths made by `trace` also carry `lift`, a list of `[first, last]` point index ranges where
-the pen is lifted, and `source`, the image used for the background tint.
+the pen is lifted, and `source`, the image used for the background tint. A `title` entry,
+which `text` fills in, becomes the default label.
 
 ## How it works
 
@@ -242,6 +293,13 @@ the pen is lifted, and `source`, the image used for the background tint.
 * `min_stroke` drops specks and spurs shorter than this many pixels
 * `resample` is the number of points in the final path, default 6000
 * `retrace_cost` weighs going back over drawn lines against jumping a gap
+
+### Text
+
+* `stroke` is `center` for one line through each letter or `outline` around each letter
+* `font` is a font name or a font file, picked automatically when left out
+* `size` is the font size in pixels used for tracing, default 220
+* `resample`, `min_stroke` and `retrace_cost` work as in tracing
 
 ### Drawing
 
@@ -282,7 +340,8 @@ dwfs draw photo.json
 
 The same tool also runs in the browser: open
 [`web/index.html`](https://github.com/anishbhattarai-asm/DWFS/blob/main/web/index.html),
-load an image, press Build, then Download JSON.
+load an image, press Build, then Download JSON. Even twelve thousand points take only a
+moment to route.
 
 ## LaTeX
 
@@ -305,9 +364,10 @@ while fonts are generated. After that it is cached.
   Getting good results.
 * **The drawing has too many tiny loops.** Raise `min_stroke`, lower `maxdim`, or try the
   other `mode`.
-* **A label in Nepali or another non Latin script looks wrong.** The letters show, but
-  matplotlib cannot join them the way those scripts need, so vowel signs can be missing or
-  misplaced. Use a Latin label with `label=`.
+* **Nepali or other joined script text looks broken.** Labels and `dwfs text` shape these
+  scripts through Pillow, which works when Pillow has its text layout support, as the
+  standard Windows, macOS and Linux installs do, and when a font for the script is
+  installed. Without them the letters show but vowel signs can be misplaced.
 * **Another tool broke after installing.** DWFS depends on `opencv-python`. If you also have
   `opencv-python-headless` or `opencv-contrib-python`, they share one `cv2` folder, so
   install all of them at the same version.
@@ -336,14 +396,18 @@ pytest
 
 Releases go to PyPI automatically. Raise `__version__` in `dwfs/__init__.py`, add the
 changes to `CHANGELOG.md`, push, then publish a GitHub release whose tag is that version
-with a `v` in front, such as `v0.2.0`. The publish workflow runs the tests, checks the tag
+with a `v` in front, such as `v0.3.0`. The publish workflow runs the tests, checks the tag
 against the version, builds the package and uploads it through PyPI trusted publishing, so
-no token is stored anywhere.
+no token is stored anywhere. The workflows run with read only permissions, every action is
+pinned to an exact commit, and Dependabot proposes updates to those pins each week. For
+one more safeguard, add yourself as a required reviewer of the `pypi` environment in the
+repository settings, so every upload waits for your approval.
 
 ## Project layout
 
 ```
 dwfs/tracing.py    image to one continuous path
+dwfs/vector.py     SVG files and text to one continuous path
 dwfs/drawing.py    Fourier series and epicycle animation
 dwfs/stipple.py    stipple path for tonal images
 dwfs/player.py     the interactive window

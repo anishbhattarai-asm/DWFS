@@ -1,7 +1,17 @@
 # Changelog
 
-## 0.2.1
+## 0.3.0
 
+* SVG input: `dwfs make logo.svg` draws from the exact vector outlines, with paths, shapes,
+  transforms and `use` references, and refuses files with DOCTYPE or entity declarations
+* Text input: `dwfs text "Hello"` writes words in one continuous line, as a centerline or as
+  letter outlines, with automatic font choice and proper shaping for Nepali and other scripts
+* Labels in any script are shaped properly, and explicit labels keep their capitalization
+* Live Theme and Style buttons in the window, plus `t`, `s`, `,` and `.` keys to switch theme,
+  switch style and jump to the previous or next N
+* The browser stipple tool finds neighbors with a grid, so twelve thousand points route in
+  milliseconds instead of tens of seconds
+* GitHub Actions pinned to exact commits, with Dependabot keeping them current
 * Video export is about ten times faster: only the moving parts are redrawn each frame and the
   frames go straight to FFmpeg. A full default MP4 now takes about as long as it plays
 * GIF export uses FFmpeg with an optimized palette, at up to 20 frames per second
