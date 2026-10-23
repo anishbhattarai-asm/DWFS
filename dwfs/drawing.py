@@ -1,5 +1,7 @@
 import os
 import re
+import math
+import functools
 import json
 import shutil
 import tempfile
@@ -10,6 +12,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib import font_manager
 from matplotlib.colors import to_rgb
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
@@ -39,6 +42,20 @@ DEFAULTS = {
     "fps": 30,
     "dpi": 120,
 }
+LIMITS = {
+    "linear": (1, 10000),
+    "growth": (1.01, 100),
+    "stage_frames": (1, 100000),
+    "frames": (1, 1000000),
+    "hold": (0, 1000000),
+    "draw_circles": (1, 100000),
+    "ghost_alpha": (0, 1),
+    "zoom": (0.01, 1000),
+    "fps": (1, 240),
+    "dpi": (10, 1200),
+}
+OUTPUTS = (".png", ".jpg", ".jpeg", ".mp4", ".mov", ".mkv", ".avi", ".gif")
+MAX_POINTS = 500000
 THEMES = {
     "light": {"bg": "#f4f5f5", "ink": "#141414", "circle": 0.34, "chains": ("#2f6aa8", "#b5473a"),
               "accent": "#2e8b72", "text": "#3b4252", "width": 1.1, "panel": "#fcfdfd",
@@ -60,17 +77,44 @@ TARGET_NAMES = {"x": "x chain", "y": "y chain", "pen": "pen"}
 def load(data):
     if not isinstance(data, dict):
         with open(data) as f:
-            data = json.load(f)
-    path = np.array(data["path"], dtype=float)
-    w = float(data.get("width", path[:, 0].max()))
-    h = float(data.get("height", path[:, 1].max()))
+            try:
+                data = json.load(f)
+            except ValueError:
+                raise ValueError("%s is not a DWFS path file" % data) from None
+    if not isinstance(data, dict) or "path" not in data:
+        raise ValueError("a path needs a \"path\" list of [x, y] points")
+    try:
+        path = np.array(data["path"], dtype=float)
+    except (TypeError, ValueError):
+        raise ValueError("every point in the path must be a pair of numbers") from None
+    if path.ndim != 2 or path.shape[1] != 2 or len(path) < 3:
+        raise ValueError("a path needs at least 3 points, each a pair of numbers")
+    if len(path) > MAX_POINTS:
+        raise ValueError("a path can have at most %d points, this one has %d" % (MAX_POINTS, len(path)))
+    if not np.isfinite(path).all() or np.ptp(path, axis=0).max() <= 0:
+        raise ValueError("the path points must be finite and not all in the same place")
+    w = float(data.get("width") or path[:, 0].max())
+    h = float(data.get("height") or path[:, 1].max())
     z = (path[:, 0] - w / 2.0) - 1j * (path[:, 1] - h / 2.0)
     lift = np.zeros(len(z), dtype=bool)
-    for a, b in data.get("lift", []):
-        lift[a:b + 1] = True
-    return z, w, h, data.get("source"), lift
+    for item in data.get("lift", []):
+        try:
+            a, b = (int(v) for v in item)
+        except (TypeError, ValueError):
+            raise ValueError("each lift entry must be a pair of point indexes") from None
+        lift[max(a, 0):max(b + 1, 0)] = True
+    source = data.get("source")
+    return z, w, h, source if isinstance(source, str) else None, lift
 
 
+def label_fonts():
+    names = {f.name for f in font_manager.fontManager.ttflist}
+    picks = [n for n in ("Nirmala UI", "Noto Sans Devanagari", "Lohit Devanagari", "Noto Sans",
+                         "Arial Unicode MS", "Segoe UI") if n in names]
+    return picks + ["DejaVu Sans"]
+
+
+@functools.lru_cache(maxsize=None)
 def latex_ready():
     if not shutil.which("latex"):
         return False
@@ -320,9 +364,13 @@ def build(m, cfg, dpi=None, controls=0.0, offscreen=False):
     e_text = foot.text(0.5, 0.2, "", math_fontfamily="cm", color=theme["text"], fontsize=13,
                        ha="center", va="center")
     status = foot.text(0.97, 0.2, "", color=theme["text"], fontsize=9, ha="right", va="center", alpha=0.85)
-    if label:
+    if label and label.isascii():
         caption = foot.text(0.04, 0.55, r"$\mathrm{%s}$" % label.replace(" ", r"\ "), math_fontfamily="cm",
                             color=theme["text"], fontsize=17, va="center")
+    elif label:
+        caption = foot.text(0.04, 0.55, label, family=label_fonts(), color=theme["text"], fontsize=16,
+                            va="center")
+    if label:
         renderer = fig.canvas.get_renderer()
         limit = n_label.get_window_extent(renderer).x0 - 14 * fig.dpi / 72
         while caption.get_window_extent(renderer).x1 > limit and caption.get_fontsize() > 7:
@@ -411,7 +459,7 @@ def build(m, cfg, dpi=None, controls=0.0, offscreen=False):
 
 
 def animate(data, **options):
-    cfg = settings(DEFAULTS, options)
+    cfg = settings(DEFAULTS, options, LIMITS)
     scene = build(model(data, cfg), cfg)
     return FuncAnimation(scene.fig, scene.step, frames=len(scene.frames), init_func=lambda: scene.step(0),
                          interval=1000 / cfg.fps, blit=False)
@@ -442,9 +490,23 @@ def temp_path(suffix):
     return path
 
 
+@functools.lru_cache(maxsize=None)
+def has_h264(ffmpeg):
+    try:
+        found = subprocess.run([ffmpeg, "-hide_banner", "-encoders"], capture_output=True, text=True,
+                               timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "libx264" in found
+
+
 def encode(scene, cfg, out, ffmpeg, report):
     gif = out.lower().endswith(".gif")
     target = temp_path(".mp4") if gif else out
+    if has_h264(ffmpeg):
+        codec = ["-c:v", "libx264", "-preset", "fast", "-crf", "12" if gif else "18"]
+    else:
+        codec = ["-c:v", "mpeg4", "-q:v", "1" if gif else "2"]
     proc = None
     try:
         for frame in frames_of(scene, report):
@@ -453,10 +515,12 @@ def encode(scene, cfg, out, ffmpeg, report):
                 proc = subprocess.Popen(
                     [ffmpeg, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
                      "-s", "%dx%d" % (w, h), "-r", str(cfg.fps), "-i", "-",
-                     "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libx264", "-preset", "fast",
-                     "-crf", "12" if gif else "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", target],
+                     "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"] + codec + ["-pix_fmt", "yuv420p", target],
                     stdin=subprocess.PIPE)
-            proc.stdin.write(frame.tobytes())
+            try:
+                proc.stdin.write(frame.tobytes())
+            except OSError:
+                raise RuntimeError("ffmpeg stopped while saving %s, see its message above" % out) from None
         proc.stdin.close()
         if proc.wait() != 0:
             raise RuntimeError("ffmpeg could not encode the video")
@@ -479,15 +543,33 @@ def encode(scene, cfg, out, ffmpeg, report):
     return out
 
 
+def gif_with_pillow(scene, cfg, out, report):
+    stride = max(int(round(cfg.fps / min(cfg.fps, 20))), math.ceil(len(scene.frames) / 360))
+    images = []
+    for i, frame in enumerate(frames_of(scene, report)):
+        if i % stride == 0:
+            images.append(Image.fromarray(frame).convert("RGB").quantize(colors=200, method=2, dither=0))
+    images[0].save(out, save_all=True, append_images=images[1:], loop=0,
+                   duration=max(20, int(round(1000 * stride / cfg.fps))))
+    return out
+
+
 def draw(data, save=None, progress=False, **options):
-    cfg = settings(DEFAULTS, options)
+    cfg = settings(DEFAULTS, options, LIMITS)
+    if save:
+        save = os.fspath(save)
+        ext = os.path.splitext(save)[1].lower()
+        if ext not in OUTPUTS:
+            raise ValueError("cannot save as %s, use one of %s" % (ext or "a file without a type", " ".join(OUTPUTS)))
+        folder = os.path.dirname(os.path.abspath(save))
+        if not os.path.isdir(folder):
+            raise ValueError("the folder %s does not exist" % folder)
     m = model(data, cfg)
     if not save:
         from .player import play
         play(data, m, cfg)
         return None
 
-    save = os.fspath(save)
     scene = build(m, cfg, offscreen=True)
     fig = scene.fig
     if save.lower().endswith((".png", ".jpg", ".jpeg")):
@@ -506,8 +588,4 @@ def draw(data, save=None, progress=False, **options):
         return encode(scene, cfg, save, ffmpeg, report)
     if not save.lower().endswith(".gif"):
         raise ValueError("saving %s needs FFmpeg on your PATH, or save a .gif instead" % save)
-    anim = FuncAnimation(fig, scene.step, frames=len(scene.frames), init_func=lambda: scene.step(0),
-                         interval=1000 / cfg.fps, blit=False)
-    anim.save(save, writer="pillow", fps=min(cfg.fps, 20), dpi=cfg.dpi,
-              savefig_kwargs={"facecolor": fig.get_facecolor()}, progress_callback=report)
-    return save
+    return gif_with_pillow(scene, cfg, save, report)
