@@ -16,6 +16,7 @@ DEFAULTS = {
     "c": 7,
     "canny_low": 40,
     "canny_high": 100,
+    "contrast": 0.0,
     "line_art": 0.6,
     "background": 0.6,
     "min_stroke": 6,
@@ -69,6 +70,10 @@ def is_line_art(gray, cfg):
 
 def edges(img, cfg):
     smooth = img
+    if cfg.contrast > 0:
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        lab[..., 0] = cv2.createCLAHE(clipLimit=float(cfg.contrast), tileGridSize=(8, 8)).apply(lab[..., 0])
+        smooth = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
     for _ in range(4):
         smooth = cv2.bilateralFilter(smooth, 9, 40, 7)
     bw = cv2.Canny(smooth, cfg.canny_low, cfg.canny_high)
