@@ -1,29 +1,42 @@
 import os
-import sys
-import json
 import time
 import numpy as np
 from PIL import Image
 from scipy.spatial import cKDTree
 
-MAX_DIM = 400
-GAMMA = 1.6
-WHITE_CUTOFF = 230.0
-POINTS = 8000
-RELAX = 30
-KNN = 10
-TWO_OPT_SECONDS = 15
+from .options import settings
+from .tracing import save_json
+
+DEFAULTS = {
+    "maxdim": 400,
+    "gamma": 1.6,
+    "white_cutoff": 230.0,
+    "points": 8000,
+    "relax": 30,
+    "knn": 10,
+    "seconds": 15.0,
+    "seed": None,
+}
 
 
-def load_density(path):
-    img = Image.open(path).convert("L")
-    scale = min(1.0, MAX_DIM / max(img.size))
+def load_density(image, cfg):
+    if isinstance(image, (str, os.PathLike)):
+        img = Image.open(image)
+    elif hasattr(image, "convert"):
+        img = image
+    else:
+        arr = np.asarray(image)
+        if arr.dtype != np.uint8:
+            arr = np.clip(arr * 255.0 if arr.max() <= 1.0 else arr, 0, 255).astype(np.uint8)
+        img = Image.fromarray(arr)
+    img = img.convert("L")
+    scale = min(1.0, cfg.maxdim / max(img.size))
     w = max(1, round(img.size[0] * scale))
     h = max(1, round(img.size[1] * scale))
     img = img.resize((w, h))
     lum = np.asarray(img, dtype=float)
-    base = np.clip((WHITE_CUTOFF - lum) / WHITE_CUTOFF, 0.0, 1.0)
-    density = base ** GAMMA
+    base = np.clip((cfg.white_cutoff - lum) / cfg.white_cutoff, 0.0, 1.0)
+    density = base ** cfg.gamma
     return density, w, h
 
 
@@ -48,6 +61,8 @@ def relax(px, py, density, w, h, iters, rng):
     pix = pix[keep]
     wgt = wgt[keep]
     ys, xs = np.nonzero(density > 1e-6)
+    if not len(xs):
+        return px, py
     prob = density[ys, xs]
     prob = prob / prob.sum()
     for _ in range(iters):
@@ -98,7 +113,7 @@ def two_opt(order, pts, knn, seconds):
     n = len(order)
     order = order.copy()
     tree = cKDTree(pts)
-    _, nb = tree.query(pts, k=knn + 1)
+    _, nb = tree.query(pts, k=min(knn + 1, n))
     nb = nb[:, 1:]
     pos = np.empty(n, dtype=int)
     pos[order] = np.arange(n)
@@ -154,26 +169,22 @@ def two_opt(order, pts, knn, seconds):
     return order
 
 
-def main():
-    src = sys.argv[1] if len(sys.argv) > 1 else "input.png"
-    out = sys.argv[2] if len(sys.argv) > 2 else "tsp.json"
-    rng = np.random.default_rng()
-
-    density, w, h = load_density(src)
-    px, py = sample_points(density, w, h, POINTS, rng)
-    px, py = relax(px, py, density, w, h, RELAX, rng)
+def stipple(image, out=None, **options):
+    cfg = settings(DEFAULTS, options)
+    rng = np.random.default_rng(cfg.seed)
+    density, w, h = load_density(image, cfg)
+    px, py = sample_points(density, w, h, cfg.points, rng)
+    px, py = relax(px, py, density, w, h, cfg.relax, rng)
     pts = np.column_stack([px, py])
     order = greedy_tour(pts)
-    order = two_opt(order, pts, KNN, TWO_OPT_SECONDS)
+    order = two_opt(order, pts, cfg.knn, cfg.seconds)
 
     path = pts[order]
     length = float(np.sum(np.hypot(np.diff(path[:, 0]), np.diff(path[:, 1]))))
-    data = {"width": w, "height": h, "closed": True, "source": os.path.abspath(src),
+    source = os.path.abspath(os.fspath(image)) if isinstance(image, (str, os.PathLike)) else None
+    data = {"width": w, "height": h, "closed": True, "mode": "stipple", "source": source,
+            "stats": {"points": len(path), "route": round(length, 1)},
             "path": [[round(float(x), 2), round(float(y), 2)] for x, y in path]}
-    with open(out, "w") as f:
-        json.dump(data, f)
-    print("points", len(path), "tour", round(length, 1), "wrote", out)
-
-
-if __name__ == "__main__":
-    main()
+    if out:
+        save_json(data, out)
+    return data

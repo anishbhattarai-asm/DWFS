@@ -1,5 +1,4 @@
 import os
-import sys
 import json
 import numpy as np
 import cv2
@@ -8,61 +7,72 @@ from scipy.sparse.csgraph import dijkstra, connected_components
 from scipy.spatial import cKDTree
 from skimage.morphology import skeletonize
 
-MAXDIM = 820
-MODE = "auto"
-BLOCK = 21
-C = 7
-CANNY_LOW = 40
-CANNY_HIGH = 100
-LINE_ART = 0.6
-BACKGROUND = 0.6
-MIN_STROKE = 6
-RESAMPLE = 6000
-RETRACE_COST = 0.5
-NEAR = 48.0
+from .options import settings
 
+DEFAULTS = {
+    "maxdim": 820,
+    "mode": "auto",
+    "block": 21,
+    "c": 7,
+    "canny_low": 40,
+    "canny_high": 100,
+    "line_art": 0.6,
+    "background": 0.6,
+    "min_stroke": 6,
+    "resample": 6000,
+    "retrace_cost": 0.5,
+}
+NEAR = 48.0
 OFFSETS = ((1, 0), (0, 1), (1, 1), (-1, 1))
 
 
-def binarize(gray):
+def read_image(image):
+    if isinstance(image, (str, os.PathLike)):
+        img = cv2.imread(os.fspath(image), cv2.IMREAD_UNCHANGED)
+        if img is None:
+            raise FileNotFoundError("could not read image %s" % os.fspath(image))
+        rgb = False
+    else:
+        if hasattr(image, "convert"):
+            image = image.convert("RGBA")
+        img = np.asarray(image)
+        rgb = True
+    if img.dtype == np.uint16:
+        img = (img // 257).astype(np.uint8)
+    elif img.dtype != np.uint8:
+        img = np.asarray(img, dtype=float)
+        img = np.clip(img * 255.0 if img.max() <= 1.0 else img, 0, 255).astype(np.uint8)
+    if img.ndim == 2:
+        return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    if img.shape[2] == 4:
+        alpha = img[..., 3:].astype(float) / 255.0
+        img = (img[..., :3] * alpha + 255.0 * (1.0 - alpha)).astype(np.uint8)
+    return cv2.cvtColor(img, cv2.COLOR_RGB2BGR) if rgb else img
+
+
+def binarize(gray, cfg):
     bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                               cv2.THRESH_BINARY_INV, BLOCK, C)
+                               cv2.THRESH_BINARY_INV, cfg.block, cfg.c)
     return cv2.medianBlur(bw, 3)
 
 
-def is_line_art(gray):
+def is_line_art(gray, cfg):
     level = np.median(gray)
-    if np.mean(np.abs(gray.astype(float) - level) < 12) < BACKGROUND:
+    if np.mean(np.abs(gray.astype(float) - level) < 12) < cfg.background:
         return False
     dark = (gray < level - 40).astype(np.uint8)
     if dark.mean() < 0.002:
         return False
     core = cv2.erode(dark, np.ones((5, 5), np.uint8))
-    return core.sum() / dark.sum() < LINE_ART
+    return core.sum() / dark.sum() < cfg.line_art
 
 
-def edges(img):
+def edges(img, cfg):
     smooth = img
     for _ in range(4):
         smooth = cv2.bilateralFilter(smooth, 9, 40, 7)
-    bw = cv2.Canny(smooth, CANNY_LOW, CANNY_HIGH)
+    bw = cv2.Canny(smooth, cfg.canny_low, cfg.canny_high)
     return cv2.morphologyEx(bw, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
-
-
-def read_image(src):
-    img = cv2.imread(src, cv2.IMREAD_UNCHANGED)
-    if img is None:
-        return None
-    if img.dtype == np.uint16:
-        img = (img // 257).astype(np.uint8)
-    elif img.dtype != np.uint8:
-        img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    if img.ndim == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-    elif img.shape[2] == 4:
-        alpha = img[..., 3:].astype(float) / 255.0
-        img = (img[..., :3] * alpha + 255.0 * (1.0 - alpha)).astype(np.uint8)
-    return img
 
 
 def pixel_graph(skel):
@@ -129,7 +139,7 @@ def route(xy, a, b, retrace_cost):
     weight = np.hypot(*(xy[a] - xy[b]).T)
     links = []
     cuts = []
-    stats = {"left": len(a), "jumps": 0, "jump_length": 0.0}
+    stats = {"left": len(a), "gaps": 0, "gap_length": 0.0}
 
     def graph():
         ja = np.array([p for p, _ in links], dtype=np.int64)
@@ -204,8 +214,8 @@ def route(xy, a, b, retrace_cost):
         p, q = int(reach[best]), int(todo[k[best]])
         follow(cur, p, pred, path)
         links.append((p, q))
-        stats["jumps"] += 1
-        stats["jump_length"] += float(gap[best])
+        stats["gaps"] += 1
+        stats["gap_length"] += float(gap[best])
         g = graph()
         path.append(q)
         cuts.append(len(path) - 1)
@@ -216,6 +226,7 @@ def route(xy, a, b, retrace_cost):
         if retrace_cost * dist[start] <= np.hypot(*(xy[cur] - xy[start])):
             follow(cur, start, pred, path)
     stats["ink"] = float(weight.sum())
+    del stats["left"]
     if len(path) > 1 and path[-1] == path[0]:
         path = path[:-1]
     return xy[path], cuts, stats
@@ -256,41 +267,39 @@ def lift_ranges(walk, cuts, n):
     return out
 
 
-def main():
-    src = sys.argv[1] if len(sys.argv) > 1 else "input.png"
-    out = sys.argv[2] if len(sys.argv) > 2 else "tsp.json"
+def save_json(data, out):
+    with open(out, "w") as f:
+        json.dump(data, f)
 
-    img = read_image(src)
-    if img is None:
-        print("could not read", src)
-        return
-    scale = min(1.0, MAXDIM / max(img.shape[:2]))
-    img = cv2.resize(img, (int(img.shape[1] * scale), int(img.shape[0] * scale)), interpolation=cv2.INTER_AREA)
+
+def trace(image, out=None, **options):
+    cfg = settings(DEFAULTS, options)
+    img = read_image(image)
+    scale = min(1.0, cfg.maxdim / max(img.shape[:2]))
+    size = (max(1, int(img.shape[1] * scale)), max(1, int(img.shape[0] * scale)))
+    img = cv2.resize(img, size, interpolation=cv2.INTER_AREA)
     h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    mode = MODE if MODE != "auto" else ("lines" if is_line_art(gray) else "photo")
-    bw = binarize(gray) if mode == "lines" else edges(img)
-    skel = clean(skeletonize(bw > 0), MIN_STROKE)
+    if cfg.mode not in ("auto", "lines", "photo"):
+        raise ValueError("mode must be auto, lines or photo")
+    mode = cfg.mode if cfg.mode != "auto" else ("lines" if is_line_art(gray, cfg) else "photo")
+    bw = binarize(gray, cfg) if mode == "lines" else edges(img, cfg)
+    skel = clean(skeletonize(bw > 0), cfg.min_stroke)
     xy, a, b = pixel_graph(skel)
     if not len(a):
-        print("no strokes found")
-        return
+        raise ValueError("no lines found in the image")
 
-    walk, cuts, stats = route(xy, a, b, RETRACE_COST)
-    seg = np.hypot(*np.diff(np.vstack([walk, walk[:1]]), axis=0).T)
-    count = min(RESAMPLE, len(walk))
+    walk, cuts, stats = route(xy, a, b, cfg.retrace_cost)
+    count = min(cfg.resample, len(walk))
     path = resample_closed(walk, count)
+    stats["route"] = float(np.hypot(*np.diff(np.vstack([walk, walk[:1]]), axis=0).T).sum())
+    source = os.path.abspath(os.fspath(image)) if isinstance(image, (str, os.PathLike)) else None
 
-    data = {"width": w, "height": h, "closed": True, "source": os.path.abspath(src),
+    data = {"width": w, "height": h, "closed": True, "mode": mode, "source": source,
+            "stats": {key: round(value, 1) for key, value in stats.items()},
             "lift": lift_ranges(walk, cuts, count),
             "path": [[round(float(x), 2), round(float(y), 2)] for x, y in path]}
-    with open(out, "w") as f:
-        json.dump(data, f)
-    print("mode", mode, "pixels", len(xy), "ink", round(stats["ink"], 1), "route", round(float(seg.sum()), 1),
-          "jumps", stats["jumps"], "jump length", round(stats["jump_length"], 1),
-          "points", len(path), "wrote", out)
-
-
-if __name__ == "__main__":
-    main()
+    if out:
+        save_json(data, out)
+    return data

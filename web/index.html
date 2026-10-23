@@ -386,7 +386,7 @@ downloadBtn.addEventListener("click", function () {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "tsp.json";
+    a.download = "path.json";
     a.click();
     URL.revokeObjectURL(url);
 });
