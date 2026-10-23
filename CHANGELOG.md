@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+* Video export is about ten times faster: only the moving parts are redrawn each frame and the
+  frames go straight to FFmpeg. A full default MP4 now takes about as long as it plays
+* GIF export uses FFmpeg with an optimized palette, at up to 20 frames per second
+* Inside the lens, the main chains no longer show through the panel
+* Temporary files from saving in the window are cleaned up
+* Export errors are reported as a short message instead of a traceback
+
 ## 0.2.0
 
 * Interactive window: a timeline you can click or drag, buttons for play, pause, restart,

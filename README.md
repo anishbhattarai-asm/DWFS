@@ -257,7 +257,7 @@ the pen is lifted, and `source`, the image used for the background tint.
 * `lens` shows the magnifier, `follow` picks what it follows (`auto`, `x`, `y` or `pen`) and
   `zoom` multiplies its magnification
 * `latex` uses real LaTeX for the formulas when it is available
-* `fps` and `dpi` for exports
+* `fps` and `dpi` for exports. GIFs play at up to 20 frames per second to stay small
 
 ### Stipple
 
