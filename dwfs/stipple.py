@@ -19,6 +19,17 @@ DEFAULTS = {
 }
 
 
+LIMITS = {
+    "maxdim": (16, 20000),
+    "gamma": (0.05, 20),
+    "white_cutoff": (1, 255),
+    "points": (16, 200000),
+    "relax": (0, 1000),
+    "knn": (1, 100),
+    "seconds": (0, 3600),
+}
+
+
 def load_density(image, cfg):
     if isinstance(image, (str, os.PathLike)):
         img = Image.open(image)
@@ -170,7 +181,7 @@ def two_opt(order, pts, knn, seconds):
 
 
 def stipple(image, out=None, **options):
-    cfg = settings(DEFAULTS, options)
+    cfg = settings(DEFAULTS, options, LIMITS)
     rng = np.random.default_rng(cfg.seed)
     density, w, h = load_density(image, cfg)
     px, py = sample_points(density, w, h, cfg.points, rng)

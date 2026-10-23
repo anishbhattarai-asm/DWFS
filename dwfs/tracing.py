@@ -23,6 +23,19 @@ DEFAULTS = {
     "resample": 6000,
     "retrace_cost": 0.5,
 }
+LIMITS = {
+    "maxdim": (32, 20000),
+    "block": (3, 999),
+    "c": (-255, 255),
+    "canny_low": (0, 1000),
+    "canny_high": (0, 1000),
+    "contrast": (0, 40),
+    "line_art": (0, 1),
+    "background": (0, 1),
+    "min_stroke": (1, 10000),
+    "resample": (16, 1000000),
+    "retrace_cost": (0, 1000),
+}
 NEAR = 48.0
 OFFSETS = ((1, 0), (0, 1), (1, 1), (-1, 1))
 
@@ -53,7 +66,7 @@ def read_image(image):
 
 def binarize(gray, cfg):
     bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                               cv2.THRESH_BINARY_INV, cfg.block, cfg.c)
+                               cv2.THRESH_BINARY_INV, int(cfg.block), cfg.c)
     return cv2.medianBlur(bw, 3)
 
 
@@ -278,7 +291,9 @@ def save_json(data, out):
 
 
 def trace(image, out=None, **options):
-    cfg = settings(DEFAULTS, options)
+    cfg = settings(DEFAULTS, options, LIMITS)
+    if int(cfg.block) % 2 == 0:
+        raise ValueError("block must be an odd number, got %r" % cfg.block)
     img = read_image(image)
     scale = min(1.0, cfg.maxdim / max(img.shape[:2]))
     size = (max(1, int(img.shape[1] * scale)), max(1, int(img.shape[0] * scale)))
