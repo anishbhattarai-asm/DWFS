@@ -2,6 +2,7 @@ import os
 import re
 import math
 import functools
+import unicodedata
 import json
 import shutil
 import tempfile
@@ -15,8 +16,9 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib import font_manager
 from matplotlib.colors import to_rgb
 from matplotlib.figure import Figure
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from matplotlib.patches import Rectangle
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont, features
 
 from .options import settings
 
@@ -72,6 +74,8 @@ FORMULAS = {
 }
 TARGETS = {"axes": ["x", "y", "pen"], "classic": ["pen"]}
 TARGET_NAMES = {"x": "x chain", "y": "y chain", "pen": "pen"}
+FONT_CHOICES = ("Nirmala UI", "Noto Sans Devanagari", "Lohit Devanagari", "Microsoft YaHei", "Noto Sans CJK SC",
+                "SimHei", "Malgun Gothic", "Arial Unicode MS", "Segoe UI", "Noto Sans", "DejaVu Sans")
 
 
 def load(data):
@@ -103,15 +107,58 @@ def load(data):
         except (TypeError, ValueError):
             raise ValueError("each lift entry must be a pair of point indexes") from None
         lift[max(a, 0):max(b + 1, 0)] = True
-    source = data.get("source")
-    return z, w, h, source if isinstance(source, str) else None, lift
+    source, title = data.get("source"), data.get("title")
+    return (z, w, h, source if isinstance(source, str) else None, lift,
+            title if isinstance(title, str) else None)
 
 
-def label_fonts():
-    names = {f.name for f in font_manager.fontManager.ttflist}
-    picks = [n for n in ("Nirmala UI", "Noto Sans Devanagari", "Lohit Devanagari", "Noto Sans",
-                         "Arial Unicode MS", "Segoe UI") if n in names]
-    return picks + ["DejaVu Sans"]
+@functools.lru_cache(maxsize=64)
+def font_for(text, preferred=None):
+    from matplotlib.ft2font import FT2Font
+    if preferred:
+        try:
+            return font_manager.findfont(preferred, fallback_to_default=False)
+        except ValueError:
+            raise ValueError("font %s was not found" % preferred) from None
+    chars = {ord(c) for c in text if not c.isspace()}
+    fallback = None
+    for name in FONT_CHOICES:
+        try:
+            path = font_manager.findfont(name, fallback_to_default=False)
+            face = FT2Font(path)
+        except (ValueError, OSError, RuntimeError):
+            continue
+        fallback = fallback or path
+        if all(face.get_char_index(c) for c in chars):
+            return path
+    return fallback or font_manager.findfont("DejaVu Sans")
+
+
+def clean_label(text):
+    kept = [ch if unicodedata.category(ch)[0] in "LNM" or ch in " .,!?()" else " " for ch in str(text)]
+    return " ".join("".join(kept).split())
+
+
+def shaped_label(ax, label, color, points):
+    engine = ImageFont.Layout.RAQM if features.check("raqm") else ImageFont.Layout.BASIC
+    font = ImageFont.truetype(font_for(label), int(points * 4), layout_engine=engine)
+    box = ImageDraw.Draw(Image.new("L", (1, 1))).textbbox((0, 0), label, font=font)
+    img = Image.new("RGBA", (box[2] - box[0] + 8, box[3] - box[1] + 8), (0, 0, 0, 0))
+    rgb = tuple(int(round(255 * v)) for v in to_rgb(color))
+    ImageDraw.Draw(img).text((4 - box[0], 4 - box[1]), label, font=font, fill=rgb + (255,))
+    art = AnnotationBbox(OffsetImage(np.asarray(img), zoom=0.25), (0.04, 0.55), xycoords=ax.transAxes,
+                         box_alignment=(0, 0.5), frameon=False, pad=0)
+    ax.add_artist(art)
+    return art
+
+
+def openable(path):
+    try:
+        with Image.open(path) as img:
+            img.verify()
+        return True
+    except Exception:
+        return False
 
 
 @functools.lru_cache(maxsize=None)
@@ -258,7 +305,7 @@ def model(data, cfg):
         raise ValueError("theme must be light or dark")
     if cfg.follow not in ("auto", "x", "y", "pen"):
         raise ValueError("follow must be auto, x, y or pen")
-    z, w, h, source, lift = load(data)
+    z, w, h, source, lift, title = load(data)
     n = len(z)
     c, k = spectrum(z)
     levels = stages(n // 2, cfg)
@@ -274,7 +321,7 @@ def model(data, cfg):
     for ch in chain_list:
         prepare(ch, levels, n, cfg.draw_circles)
     image = cfg.image or source
-    ghost = bool(cfg.ghost and image and os.path.exists(image))
+    ghost = bool(cfg.ghost and image and os.path.exists(image) and openable(image))
     box = place(chain_list, z, w, h, ghost, cfg.style)
 
     frames = []
@@ -283,7 +330,7 @@ def model(data, cfg):
         frames += [(s, int(round((q + 1) * n / count))) for q in range(count)]
     frames += [(len(levels) - 1, n)] * (cfg.hold if cfg.grow else 0)
 
-    return SimpleNamespace(z=z, w=w, h=h, source=source, lift=lift, n=n, levels=levels, curves=curves,
+    return SimpleNamespace(z=z, w=w, h=h, source=source, title=title, lift=lift, n=n, levels=levels, curves=curves,
                            inked=inked, errors=[error(c, k, N) for N in levels], chains=chain_list,
                            image=image, ghost=ghost, box=box, frames=frames,
                            size=max(np.ptp(z.real), np.ptp(z.imag), 1e-9))
@@ -325,11 +372,16 @@ def make_layer(ax, m, theme, guides):
     return {"trace": trace, "pen": pen, "parts": parts, "artists": artists}
 
 
-def build(m, cfg, dpi=None, controls=0.0, offscreen=False):
+def build(m, cfg, dpi=None, controls=0.0, offscreen=False, figure=None):
     theme = THEMES[cfg.theme]
     g = layout(m, cfg, controls)
     x0, x1, y0, y1 = m.box
-    if offscreen:
+    if figure is not None:
+        fig = figure
+        fig.clear()
+        fig.set_facecolor(theme["bg"])
+        fig.set_size_inches(g.fig_w, g.fig_h, forward=True)
+    elif offscreen:
         fig = Figure(figsize=(g.fig_w, g.fig_h), facecolor=theme["bg"], dpi=cfg.dpi)
         FigureCanvasAgg(fig)
     else:
@@ -355,8 +407,13 @@ def build(m, cfg, dpi=None, controls=0.0, offscreen=False):
         head.text(0.04, 0.72 - 0.44 * i, (r"$\displaystyle %s$" if tex else "$%s$") % text, usetex=tex,
                   math_fontfamily="cm", color=theme["text"], fontsize=14, va="center")
 
-    label = cfg.label if cfg.label is not None else m.source and os.path.splitext(os.path.basename(m.source))[0]
-    label = re.sub(r"[\W_]+", " ", label or "").strip().title()
+    if cfg.label is not None:
+        label = clean_label(cfg.label)
+    elif m.title:
+        label = clean_label(m.title)
+    else:
+        stem = clean_label(os.path.splitext(os.path.basename(m.source))[0] if m.source else "")
+        label = stem.title() if stem.isascii() else stem
     n_label = foot.text(0.5, 0.6, r"$N \;=$", math_fontfamily="cm", color=theme["ink"], fontsize=32,
                         ha="right", va="center")
     n_text = foot.text(0.515, 0.6, "", math_fontfamily="cm", color=theme["accent"], fontsize=32,
@@ -364,17 +421,22 @@ def build(m, cfg, dpi=None, controls=0.0, offscreen=False):
     e_text = foot.text(0.5, 0.2, "", math_fontfamily="cm", color=theme["text"], fontsize=13,
                        ha="center", va="center")
     status = foot.text(0.97, 0.2, "", color=theme["text"], fontsize=9, ha="right", va="center", alpha=0.85)
+    caption = None
     if label and label.isascii():
         caption = foot.text(0.04, 0.55, r"$\mathrm{%s}$" % label.replace(" ", r"\ "), math_fontfamily="cm",
                             color=theme["text"], fontsize=17, va="center")
     elif label:
-        caption = foot.text(0.04, 0.55, label, family=label_fonts(), color=theme["text"], fontsize=16,
-                            va="center")
-    if label:
+        caption = shaped_label(foot, label, theme["text"], 16)
+    if caption is not None:
         renderer = fig.canvas.get_renderer()
         limit = n_label.get_window_extent(renderer).x0 - 14 * fig.dpi / 72
-        while caption.get_window_extent(renderer).x1 > limit and caption.get_fontsize() > 7:
-            caption.set_fontsize(caption.get_fontsize() * 0.9)
+        for _ in range(10):
+            if caption.get_window_extent(renderer).x1 <= limit:
+                break
+            if isinstance(caption, AnnotationBbox):
+                caption.offsetbox.set_zoom(caption.offsetbox.get_zoom() * 0.9)
+            else:
+                caption.set_fontsize(caption.get_fontsize() * 0.9)
 
     main = make_layer(ax, m, theme, cfg.style == "axes")
     frame_line, = ax.plot([], [], color=theme["accent"], lw=1.0, ls=(0, (3, 3)), zorder=7)
