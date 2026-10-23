@@ -7,6 +7,8 @@
 
 **Turn any picture into one continuous line, then watch spinning circles draw it.**
 
+**[Try it in your browser](https://anishbhattarai-asm.github.io/DWFS/)**, nothing to install.
+
 ![Two chains of circles drawing a horse while N grows](https://raw.githubusercontent.com/anishbhattarai-asm/DWFS/main/docs/demo.gif)
 
 ```
@@ -43,7 +45,8 @@ dwfs make logo.svg
 
 ## Quick start
 
-**1. Install.** Python 3.10 or newer.
+**1. Install.** Python 3.10 or newer. To just try it first, use the
+[browser version](https://anishbhattarai-asm.github.io/DWFS/), which runs on any device.
 
 ```
 pip install dwfs
@@ -412,9 +415,9 @@ dwfs/drawing.py    Fourier series and epicycle animation
 dwfs/stipple.py    stipple path for tonal images
 dwfs/player.py     the interactive window
 dwfs/cli.py        the dwfs command
+docs/              the browser version and README images
 web/index.html     stipple path in the browser
 tests/             test suite
-docs/              README images
 .github/           test and publish workflows
 ```
 

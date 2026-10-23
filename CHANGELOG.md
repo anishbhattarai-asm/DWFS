@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+* Browser version at https://anishbhattarai-asm.github.io/DWFS/ that traces photos, drawings,
+  SVG files and text, animates them with the same chains, lens and controls, records video
+  and exports path files for the dwfs command, all without uploading anything
+
 ## 0.3.0
 
 * SVG input: `dwfs make logo.svg` draws from the exact vector outlines, with paths, shapes,
