@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dwfs"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Draw any picture with Fourier series epicycles"
 readme = "README.md"
 license = "MIT"
@@ -32,9 +32,13 @@ test = ["pytest>=7"]
 
 [project.urls]
 Homepage = "https://github.com/anishbhattarai-asm/DWFS"
+Issues = "https://github.com/anishbhattarai-asm/DWFS/issues"
 
 [project.scripts]
 dwfs = "dwfs.cli:main"
 
 [tool.setuptools]
 packages = ["dwfs"]
+
+[tool.setuptools.dynamic]
+version = { attr = "dwfs.__version__" }

@@ -2,7 +2,7 @@
 
 Turn any picture into a single continuous line and redraw it with spinning circles.
 
-![Fourier epicycles drawing a horse as N grows](docs/preview.png)
+![Fourier epicycles drawing a horse as N grows](https://raw.githubusercontent.com/anishbhattarai-asm/DWFS/main/docs/preview.png)
 
 DWFS traces an image into one closed path, takes its Fourier series, and animates the
 epicycles that rebuild it. Two chains of circles drive the pen, one for x and one for y,
@@ -25,13 +25,10 @@ while the number of terms N grows from a rough loop to the exact drawing.
 Python 3.9 or newer.
 
 ```
-git clone https://github.com/anishbhattarai-asm/DWFS.git
-cd DWFS
-pip install .
+pip install dwfs
 ```
 
-Use `pip install -e .` instead if you want to edit the code. Exporting video needs
-[FFmpeg](https://ffmpeg.org) on your PATH.
+Exporting video needs [FFmpeg](https://ffmpeg.org) on your PATH.
 
 ## Command line
 
@@ -160,6 +157,8 @@ then Download JSON.
 ## Development
 
 ```
+git clone https://github.com/anishbhattarai-asm/DWFS.git
+cd DWFS
 pip install -e ".[test]"
 pytest
 ```
@@ -178,4 +177,4 @@ docs/              README preview
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](https://github.com/anishbhattarai-asm/DWFS/blob/main/LICENSE).
