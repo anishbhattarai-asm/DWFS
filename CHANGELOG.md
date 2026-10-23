@@ -8,6 +8,15 @@
 * Inside the lens, the main chains no longer show through the panel
 * Temporary files from saving in the window are cleaned up
 * Export errors are reported as a short message instead of a traceback
+* Every setting and path file is checked first, with clear messages instead of crashes for
+  values like `frames=0`, an even `block`, an empty path or an unsupported output type
+* Saving from the window can no longer pick up a stray `dwfs` file in the current folder
+  instead of the installed package
+* Without a screen, DWFS now says so instead of silently showing nothing
+* Labels in non Latin scripts use an installed font that has their letters
+* MP4 export works with FFmpeg builds that lack H.264, and GIF export works without FFmpeg
+* Closing the window during a save says the save is still finishing
+* GitHub workflows run with read only permissions and do not keep the checkout token
 
 ## 0.2.0
 

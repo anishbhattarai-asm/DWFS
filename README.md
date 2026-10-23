@@ -294,16 +294,34 @@ while fonts are generated. After that it is cached.
 ## Troubleshooting
 
 * **MP4 export fails with a message about ffmpeg.** Install [FFmpeg](https://ffmpeg.org)
-  and make sure it is on your PATH, or export a `.gif` instead.
+  and make sure it is on your PATH, or export a `.gif` instead. GIF also works without
+  FFmpeg, just more slowly and with at most 360 frames.
+* **"no window can be opened here".** There is no screen to draw on, for example over SSH,
+  on a server, or on Linux without `python3-tk`. Give an output file such as `out.mp4`, or
+  in a notebook use `dwfs.animate`.
 * **The first run with LaTeX seems stuck.** MiKTeX may be waiting to install missing
   packages or building fonts. Let it finish, or draw with `latex=false`.
 * **A jaw or cheek outline is missing from a photo.** Trace with `contrast=1.5`, see
   Getting good results.
 * **The drawing has too many tiny loops.** Raise `min_stroke`, lower `maxdim`, or try the
   other `mode`.
+* **A label in Nepali or another non Latin script looks wrong.** The letters show, but
+  matplotlib cannot join them the way those scripts need, so vowel signs can be missing or
+  misplaced. Use a Latin label with `label=`.
 * **Another tool broke after installing.** DWFS depends on `opencv-python`. If you also have
   `opencv-python-headless` or `opencv-contrib-python`, they share one `cv2` folder, so
   install all of them at the same version.
+
+## Privacy and safety
+
+* Everything runs on your computer. DWFS never uploads anything.
+* Path files made by `trace` record the full path of the source image, which is used for
+  the background tint, so they also reveal where that image is on your computer. Remove the
+  `source` entry before sharing a path file if that matters to you.
+* A path file from someone else can point its `source` at an image on your computer, which
+  would then appear faintly behind the drawing. Draw shared path files with `ghost=false`.
+* Settings and path files are checked before anything runs, and bad values stop with a
+  short message.
 
 ## Development
 
