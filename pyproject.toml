@@ -11,12 +11,22 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Anish Bhattarai" }]
 requires-python = ">=3.10"
-keywords = ["fourier", "epicycles", "animation", "drawing", "line art"]
+keywords = ["fourier", "fourier series", "epicycles", "animation", "drawing", "line art", "math art", "visualization"]
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Environment :: Console",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Artistic Software",
     "Topic :: Multimedia :: Graphics",
     "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
     "numpy>=1.21",
@@ -32,7 +42,9 @@ test = ["pytest>=7"]
 
 [project.urls]
 Homepage = "https://github.com/anishbhattarai-asm/DWFS"
+Source = "https://github.com/anishbhattarai-asm/DWFS"
 Issues = "https://github.com/anishbhattarai-asm/DWFS/issues"
+Changelog = "https://github.com/anishbhattarai-asm/DWFS/blob/main/CHANGELOG.md"
 
 [project.scripts]
 dwfs = "dwfs.cli:main"
