@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DWFS: Draw With Fourier Series</title>
+<meta name="description" content="Turn any photo, drawing, SVG or text into one continuous line and watch spinning Fourier circles draw it, right in your browser.">
+<meta property="og:title" content="DWFS: Draw With Fourier Series">
+<meta property="og:description" content="Any photo, SVG or text, redrawn by spinning circles. Runs in your browser.">
+<meta property="og:image" content="https://raw.githubusercontent.com/anishbhattarai-asm/DWFS/main/docs/social.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='26' cy='32' r='20' fill='none' stroke='%232e8b72' stroke-width='5'/%3E%3Ccircle cx='46' cy='32' r='10' fill='none' stroke='%232f6aa8' stroke-width='5'/%3E%3C/svg%3E">
+<style>
+:root {
+    --bg: #eef1f1;
+    --card: #ffffff;
+    --text: #1f2933;
+    --muted: #5b6672;
+    --line: #d5dcdc;
+    --accent: #2e8b72;
+    --accent-ink: #ffffff;
+    --button: #e4e9e9;
+    --hover: #d0dad9;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0b0e12;
+        --card: #121820;
+        --text: #e3e8ee;
+        --muted: #98a3b0;
+        --line: #232c36;
+        --accent: #5ad1b0;
+        --accent-ink: #062018;
+        --button: #1b2129;
+        --hover: #2b3440;
+    }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif; }
+header { max-width: 1100px; margin: 0 auto; padding: 22px 16px 8px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
+header h1 { margin: 0; font-size: 26px; letter-spacing: 0.2px; }
+header p { margin: 0; color: var(--muted); flex: 1 1 300px; }
+header nav { display: flex; gap: 14px; }
+a { color: var(--accent); }
+main { max-width: 1100px; margin: 0 auto; padding: 8px 16px 32px; display: grid; gap: 14px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.inputs h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin: 0 0 8px; }
+.drop { display: block; border: 2px dashed var(--line); border-radius: 10px; padding: 14px; text-align: center; cursor: pointer; color: var(--muted); }
+.drop.over { border-color: var(--accent); color: var(--text); }
+.drop input { display: none; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+label.small { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+textarea, select, input[type=text] { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+textarea { width: 100%; resize: vertical; min-height: 44px; }
+button { font: inherit; font-size: 14px; color: var(--text); background: var(--button); border: 0; border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+button:hover { background: var(--hover); }
+button.primary { background: var(--accent); color: var(--accent-ink); }
+button:disabled { opacity: 0.5; cursor: default; }
+.stagebox { display: flex; justify-content: center; }
+canvas { display: block; border-radius: 10px; max-width: 100%; }
+.player { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.player input[type=range] { flex: 1 1 220px; accent-color: var(--accent); }
+#speed { min-width: 3.2em; text-align: center; color: var(--muted); }
+#status { color: var(--muted); min-height: 1.5em; margin-top: 8px; }
+.keys { color: var(--muted); font-size: 13px; }
+footer { max-width: 1100px; margin: 0 auto; padding: 0 16px 32px; color: var(--muted); font-size: 13px; }
+code { background: var(--button); padding: 1px 6px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<header>
+    <h1>DWFS: Draw With Fourier Series</h1>
+    <p>Any photo, drawing, SVG or text, turned into one line and redrawn by spinning circles.</p>
+    <nav><a href="https://github.com/anishbhattarai-asm/DWFS">GitHub</a><a href="https://pypi.org/project/dwfs/">PyPI</a></nav>
+</header>
+<main>
+    <section class="card">
+        <div class="stagebox" id="stagebox"><canvas id="stage" width="1000" height="700" aria-label="Fourier drawing"></canvas></div>
+        <div class="player" style="margin-top: 12px">
+            <button id="play" class="primary">Pause</button>
+            <button id="prev" title="Previous N (,)">Prev N</button>
+            <button id="next" title="Next N (.)">Next N</button>
+            <input type="range" id="timeline" min="0" max="1000" value="0" aria-label="Timeline">
+            <button id="slower" title="Slower (down arrow)">Slower</button>
+            <span id="speed">1×</span>
+            <button id="faster" title="Faster (up arrow)">Faster</button>
+        </div>
+        <div class="player" style="margin-top: 8px">
+            <button id="lens" title="Show or hide the lens (m)">Lens</button>
+            <button id="follow" title="Change what the lens follows (f)">Follow</button>
+            <button id="theme" title="Light or dark (t)">Theme</button>
+            <button id="style" title="Two chains or one chain (s)">Style</button>
+            <button id="png">Save PNG</button>
+            <button id="record">Record video</button>
+            <button id="json" title="Use it with: dwfs draw path.json">Path JSON</button>
+        </div>
+        <div id="status">Loading…</div>
+        <div class="keys">Keys: space pause, arrows step or change speed, comma and period change N, [ and ] zoom the lens, m lens, f follow, t theme, s style.</div>
+    </section>
+    <section class="inputs">
+        <div class="card">
+            <h2>Picture</h2>
+            <label class="drop" id="drop">Drop a photo, drawing or SVG here, or click to choose one
+                <input type="file" id="file" accept="image/*,.svg">
+            </label>
+            <div class="row">
+                <label class="small">Mode
+                    <select id="mode">
+                        <option value="auto">Auto</option>
+                        <option value="lines">Drawing</option>
+                        <option value="photo">Photo</option>
+                    </select>
+                </label>
+                <label class="small">Detail <input type="range" id="detail" min="1" max="10" value="5"></label>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Text</h2>
+            <textarea id="words" rows="2">Hello</textarea>
+            <div class="row">
+                <select id="stroke">
+                    <option value="center">One line through each letter</option>
+                    <option value="outline">Around each letter</option>
+                </select>
+                <button id="write" class="primary">Draw text</button>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Samples</h2>
+            <div class="row" id="samples">
+                <button data-sample="horse">Horse</button>
+                <button data-sample="astronaut">Astronaut</button>
+                <button data-sample="text">Text</button>
+                <button data-sample="heart">Heart</button>
+                <button data-sample="star">Star SVG</button>
+            </div>
+        </div>
+    </section>
+</main>
+<footer>
+    Everything runs in your browser and nothing is uploaded. For the full version with LaTeX formulas and MP4 export,
+    run <code>pip install dwfs</code>. Made by Anish Bhattarai, MIT license.
+</footer>
+<script src="dwfs.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
