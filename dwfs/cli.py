@@ -15,7 +15,8 @@ usage:
   dwfs options                                list every option with its default
 
 JSON defaults to path.json. OUT ending in .mp4 or .gif saves a video, .png or .jpg
-saves the finished frame, and leaving it out opens a live window.
+saves the finished frame, and leaving it out opens the interactive window, where the
+buttons save too and h shows the keyboard shortcuts.
 
 examples:
   dwfs make portrait.jpg
