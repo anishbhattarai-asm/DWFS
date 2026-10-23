@@ -1,4 +1,5 @@
 import sys
+import subprocess
 
 from . import __version__
 from .tracing import DEFAULTS as TRACE, trace
@@ -127,6 +128,6 @@ def run(argv):
 def main(argv=None):
     try:
         return run(sys.argv[1:] if argv is None else argv)
-    except (ValueError, TypeError, FileNotFoundError) as exc:
+    except (ValueError, TypeError, OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         print("dwfs:", exc, file=sys.stderr)
         return 2

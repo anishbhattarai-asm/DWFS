@@ -314,7 +314,9 @@ class Player:
         out = ask_path(self.fig, ext, free_name(stem, ext))
         if not out:
             return
-        args = [sys.executable, "-m", "dwfs", "draw", self.source_file(), out] + self.options()
+        source = self.source_file()
+        temporary = not isinstance(self.data, (str, os.PathLike))
+        args = [sys.executable, "-m", "dwfs", "draw", source, out] + self.options()
         proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                 env=dict(os.environ, MPLBACKEND="Agg"),
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -328,6 +330,12 @@ class Player:
                 found = re.match(r"frame (\d+) of (\d+)", line)
                 if found:
                     job["done"] = int(found.group(1)) / max(1, int(found.group(2)))
+            proc.wait()
+            if temporary:
+                try:
+                    os.remove(source)
+                except OSError:
+                    pass
 
         threading.Thread(target=read, daemon=True).start()
         self.job = job
