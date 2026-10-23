@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import threading
 import subprocess
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.transforms import Bbox
 from matplotlib.widgets import Button
@@ -33,6 +34,8 @@ HELP = "\n".join([
     "h              hide this help",
 ])
 KINDS = {".mp4": "MP4 video", ".gif": "GIF animation", ".png": "PNG image"}
+HEADLESS = {"agg", "pdf", "ps", "svg", "pgf", "cairo", "template"}
+HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def screen_dpi(width, height):
@@ -127,6 +130,7 @@ class Player:
 
         canvas = fig.canvas
         canvas.mpl_connect("draw_event", self.on_draw)
+        canvas.mpl_connect("close_event", self.on_close)
         canvas.mpl_connect("key_press_event", self.on_key)
         canvas.mpl_connect("scroll_event", self.on_scroll)
         canvas.mpl_connect("button_press_event", self.on_press)
@@ -288,8 +292,14 @@ class Player:
     def on_release(self, event):
         self.dragging = False
 
+    def on_close(self, event):
+        if self.job and self.job["proc"].poll() is None:
+            print("still saving %s in the background, it will finish on its own" % self.job["out"], flush=True)
+
     def options(self):
         values = dict(vars(self.cfg))
+        if values.get("image"):
+            values["image"] = os.path.abspath(values["image"])
         values["lens"] = self.s.lens["on"]
         values["follow"] = self.s.targets[self.s.lens["target"]]
         values["zoom"] = self.s.lens["zoom"]
@@ -318,7 +328,7 @@ class Player:
         temporary = not isinstance(self.data, (str, os.PathLike))
         args = [sys.executable, "-m", "dwfs", "draw", source, out] + self.options()
         proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                env=dict(os.environ, MPLBACKEND="Agg"),
+                                env=dict(os.environ, MPLBACKEND="Agg"), cwd=HOME,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         job = {"proc": proc, "out": out, "kind": ext[1:].upper(), "done": 0.0, "last": "", "until": 0}
 
@@ -342,6 +352,10 @@ class Player:
 
 
 def play(data, m, cfg):
+    backend = matplotlib.get_backend().lower()
+    if backend in HEADLESS or "inline" in backend:
+        raise ValueError("no window can be opened here (matplotlib backend %s). Give an output file such as "
+                         "out.mp4, or in a notebook use dwfs.animate" % backend)
     with plt.rc_context(KEYS):
         g = layout(m, cfg, BAND)
         scene = build(m, cfg, dpi=screen_dpi(g.fig_w, g.fig_h), controls=BAND)
