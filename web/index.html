@@ -187,50 +187,83 @@ async function lloyd(px, py, density, w, h, iters) {
     }
 }
 
-function greedyTour(px, py, N) {
+function makeGrid(px, py, N) {
+    let w = 1, h = 1;
+    for (let i = 0; i < N; i++) { if (px[i] > w) w = px[i]; if (py[i] > h) h = py[i]; }
+    const cell = Math.max(1e-3, Math.sqrt((w * h) / N) * 1.5);
+    const gw = Math.floor(w / cell) + 1, gh = Math.floor(h / cell) + 1;
+    const start = new Int32Array(gw * gh + 1);
+    const cellOf = new Int32Array(N);
+    for (let i = 0; i < N; i++) {
+        const cx = Math.min(gw - 1, Math.max(0, Math.floor(px[i] / cell)));
+        const cy = Math.min(gh - 1, Math.max(0, Math.floor(py[i] / cell)));
+        cellOf[i] = cy * gw + cx;
+        start[cellOf[i] + 1]++;
+    }
+    for (let c = 0; c < gw * gh; c++) start[c + 1] += start[c];
+    const fill = start.slice(0, gw * gh);
+    const items = new Int32Array(N);
+    for (let i = 0; i < N; i++) items[fill[cellOf[i]]++] = i;
+    return { cell, gw, gh, start, items };
+}
+
+function nearest(grid, px, py, x, y, k, skip, keep) {
+    const best = [], dist = [];
+    const cx = Math.min(grid.gw - 1, Math.max(0, Math.floor(x / grid.cell)));
+    const cy = Math.min(grid.gh - 1, Math.max(0, Math.floor(y / grid.cell)));
+    const limit = Math.max(grid.gw, grid.gh);
+    for (let r = 0; r <= limit; r++) {
+        if (best.length >= k) {
+            const edge = (r - 1) * grid.cell;
+            if (edge * edge > dist[dist.length - 1]) break;
+        }
+        for (let gy = cy - r; gy <= cy + r; gy++) {
+            if (gy < 0 || gy >= grid.gh) continue;
+            for (let gx = cx - r; gx <= cx + r; gx++) {
+                if (gx < 0 || gx >= grid.gw) continue;
+                if (Math.max(Math.abs(gx - cx), Math.abs(gy - cy)) !== r) continue;
+                const c = gy * grid.gw + gx;
+                for (let t = grid.start[c]; t < grid.start[c + 1]; t++) {
+                    const j = grid.items[t];
+                    if (j === skip || (keep && !keep(j))) continue;
+                    const dx = px[j] - x, dy = py[j] - y;
+                    const d = dx * dx + dy * dy;
+                    if (best.length < k || d < dist[dist.length - 1]) {
+                        let at = dist.length;
+                        while (at > 0 && dist[at - 1] > d) at--;
+                        dist.splice(at, 0, d);
+                        best.splice(at, 0, j);
+                        if (best.length > k) { best.pop(); dist.pop(); }
+                    }
+                }
+            }
+        }
+    }
+    return best;
+}
+
+function greedyTour(px, py, N, grid) {
     const visited = new Uint8Array(N);
     const order = new Int32Array(N);
+    const alive = j => !visited[j];
     let cur = 0;
     visited[0] = 1;
     order[0] = 0;
     for (let i = 1; i < N; i++) {
-        let best = -1, bd = Infinity;
-        const cx = px[cur], cy = py[cur];
-        for (let j = 0; j < N; j++) {
-            if (visited[j]) continue;
-            const dx = px[j] - cx, dy = py[j] - cy;
-            const d = dx * dx + dy * dy;
-            if (d < bd) { bd = d; best = j; }
-        }
-        visited[best] = 1;
-        order[i] = best;
-        cur = best;
+        const found = nearest(grid, px, py, px[cur], py[cur], 1, cur, alive);
+        const next = found.length ? found[0] : visited.indexOf(0);
+        visited[next] = 1;
+        order[i] = next;
+        cur = next;
     }
     return order;
 }
 
-function buildKnn(px, py, N, k) {
+function buildKnn(px, py, N, k, grid) {
     const nb = new Int32Array(N * k);
-    const idx = new Int32Array(N);
-    const dst = new Float64Array(N);
     for (let i = 0; i < N; i++) {
-        for (let j = 0; j < N; j++) {
-            idx[j] = j;
-            const dx = px[j] - px[i], dy = py[j] - py[i];
-            dst[j] = dx * dx + dy * dy;
-        }
-        const lim = Math.min(k + 1, N);
-        for (let a = 0; a < lim; a++) {
-            let m = a;
-            for (let b = a + 1; b < N; b++) if (dst[b] < dst[m]) m = b;
-            const td = dst[a]; dst[a] = dst[m]; dst[m] = td;
-            const ti = idx[a]; idx[a] = idx[m]; idx[m] = ti;
-        }
-        let w = 0;
-        for (let a = 0; a < lim && w < k; a++) {
-            if (idx[a] !== i) { nb[i * k + w] = idx[a]; w++; }
-        }
-        while (w < k) { nb[i * k + w] = i; w++; }
+        const found = nearest(grid, px, py, px[i], py[i], k, i, null);
+        for (let n = 0; n < k; n++) nb[i * k + n] = n < found.length ? found[n] : i;
     }
     return nb;
 }
@@ -349,11 +382,12 @@ async function build() {
 
     setStatus("greedy tour");
     await tick();
-    const order = greedyTour(px, py, N);
+    const grid = makeGrid(px, py, N);
+    const order = greedyTour(px, py, N, grid);
 
     setStatus("nearest neighbors");
     await tick();
-    const nb = buildKnn(px, py, N, KNN);
+    const nb = buildKnn(px, py, N, KNN, grid);
 
     await twoOpt(order, px, py, nb, KNN, TWO_OPT_MS);
 
