@@ -7,7 +7,7 @@
 
 **Turn any picture into one continuous line, then watch spinning circles draw it.**
 
-**[Try it in your browser](https://anishbhattarai-asm.github.io/DWFS/)**, nothing to install.
+[![Try it in your browser](https://raw.githubusercontent.com/anishbhattarai-asm/DWFS/main/docs/try.svg)](https://anishbhattarai-asm.github.io/DWFS/)
 
 ![Two chains of circles drawing a horse while N grows](https://raw.githubusercontent.com/anishbhattarai-asm/DWFS/main/docs/demo.gif)
 

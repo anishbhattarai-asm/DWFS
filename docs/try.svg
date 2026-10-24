@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="56" viewBox="0 0 300 56" role="img" aria-label="Try it in your browser">
+  <title>Try it in your browser</title>
+  <defs>
+    <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#38a888"/>
+      <stop offset="1" stop-color="#2a7f68"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="298" height="54" rx="12" fill="url(#fill)" stroke="#23705c" stroke-width="1"/>
+  <circle cx="34" cy="28" r="16" fill="#ffffff" fill-opacity="0.2"/>
+  <path d="M29 19.5 L43 28 L29 36.5 Z" fill="#ffffff"/>
+  <text x="174" y="35" text-anchor="middle" font-family="Segoe UI, Helvetica Neue, Helvetica, Arial, sans-serif" font-size="19" font-weight="600" fill="#ffffff">Try it in your browser</text>
+</svg>
